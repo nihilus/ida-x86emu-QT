@@ -27,6 +27,7 @@
 #define HEAP_MAGIC 0xDEADBEEF
 
 class MallocNode {
+   friend class HeapBase;
    friend class EmuHeap;
 public:
    MallocNode(unsigned int size, unsigned int base);
@@ -45,9 +46,58 @@ private:
    MallocNode *next;
 };
 
-class EmuHeap {
+class HeapBase {
 public:
-   EmuHeap();
+//   HeapBase();
+//   HeapBase(unsigned int baseAddr, unsigned int currSize, unsigned int maxSize, HeapBase *next = 0);
+//   HeapBase(char *seg, unsigned int sz);
+   virtual ~HeapBase();
+   virtual unsigned int malloc(unsigned int size) = 0;
+   virtual unsigned int calloc(unsigned int nmemb, unsigned int size) = 0;
+   virtual unsigned int free(unsigned int addr) = 0;
+   virtual unsigned int realloc(unsigned int ptr, unsigned int size) = 0;
+
+   virtual unsigned int getHeapBase() {return base;};
+   virtual unsigned int getHeapSize() {return max - base;};
+   HeapBase *getNextHeap() {return nextHeap;};
+   
+   //careful to avoid memory leaks when calling this!
+   void setNextHeap(HeapBase *heap) {nextHeap = heap;};
+   
+   const MallocNode *heapHead() {return head;};
+
+   virtual void save(Buffer &b) = 0;
+
+   static void saveHeapLayout(Buffer &b);
+//   virtual void loadHeapLayout(Buffer &b) = 0;
+   static unsigned int addHeap(unsigned int sz, unsigned int base = 0);   //returns hHeap
+   virtual unsigned int destroyHeap(unsigned int hHeap) = 0;
+   virtual unsigned int getPrimaryHeap() = 0;
+   static HeapBase *getHeap() {return primaryHeap;};
+   virtual HeapBase *findHeap(unsigned int hHeap) = 0;
+//   static void initHeap(char *name, unsigned int maxSize = 0x100000);
+
+protected:
+   virtual bool checkHeapSize(unsigned int newsize) = 0;
+   virtual MallocNode *findMallocNode(unsigned int addr) = 0;
+   virtual unsigned int findBlock(unsigned int size) = 0;
+   virtual void insert(MallocNode *node) = 0;
+   virtual void readHeap(Buffer &b, unsigned int num_blocks) = 0;
+   virtual void writeHeap(Buffer &b) = 0;
+
+   segment_t *h;
+   unsigned int base;
+   unsigned int max;
+   unsigned int size;
+   MallocNode *head;
+   HeapBase *nextHeap;
+   static HeapBase *primaryHeap;
+};
+
+void createLegacyHeap(Buffer &b);
+
+class EmuHeap : public HeapBase {
+public:
    EmuHeap(unsigned int baseAddr, unsigned int currSize, unsigned int maxSize, EmuHeap *next = 0);
    EmuHeap(const char *seg, unsigned int sz);
    EmuHeap(Buffer &b);
@@ -59,25 +109,24 @@ public:
 
    unsigned int getHeapBase() {return base;};
    unsigned int getHeapSize() {return max - base;};
-   EmuHeap *getNextHeap() {return nextHeap;};
+   HeapBase *getNextHeap() {return nextHeap;};
    
    //careful to avoid memory leaks when calling this!
-   void setNextHeap(EmuHeap *heap) {nextHeap = heap;};
+   void setNextHeap(HeapBase *heap) {nextHeap = heap;};
    
    const MallocNode *heapHead() {return head;};
 
    void save(Buffer &b);
 
-   static void saveHeapLayout(Buffer &b);
    static void loadHeapLayout(Buffer &b);
-   static unsigned int addHeap(unsigned int sz);   //returns hHeap
-   static unsigned int destroyHeap(unsigned int hHeap);
-   static unsigned int getPrimaryHeap();
-   static EmuHeap *getHeap() {return primaryHeap;};
-   static EmuHeap *findHeap(unsigned int hHeap);
+//   unsigned int addHeap(unsigned int sz);   //returns hHeap
+   unsigned int destroyHeap(unsigned int hHeap);
+   unsigned int getPrimaryHeap();
+//   static HeapBase *getHeap() {return primaryHeap;};
+   HeapBase *findHeap(unsigned int hHeap);
    static void initHeap(const char *name, unsigned int maxSize = 0x100000);
 
-private:
+protected:
    EmuHeap(Buffer &b, unsigned int num_blocks);
 
    bool checkHeapSize(unsigned int newsize);
@@ -86,15 +135,7 @@ private:
    void insert(MallocNode *node);
    void readHeap(Buffer &b, unsigned int num_blocks);
    void writeHeap(Buffer &b);
-   segment_t *h;
-   unsigned int base;
-   unsigned int max;
-   unsigned int size;
-   MallocNode *head;
-   EmuHeap *nextHeap;
-   static EmuHeap *primaryHeap;
 };
 
-void createLegacyHeap(Buffer &b);
 
 #endif

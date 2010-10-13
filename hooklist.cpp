@@ -33,7 +33,7 @@ static HookNode *hookList = NULL;
 
 HookNode::HookNode(const char *fName, unsigned int addr, hookfunc func, unsigned int id, HookNode *nxt) :
         funcAddr(addr), func(func), moduleId(id), next(nxt) {
-   funcName = strdup(fName);
+   funcName = _strdup(fName);
 }
 
 HookNode::~HookNode() {

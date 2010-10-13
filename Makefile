@@ -1,5 +1,5 @@
 #Set this variable to point to your SDK directory
-IDA=../../
+SDKROOT=../../../
 
 #Set this variable to the desired name of your compiled loader
 PROC=x86emu
@@ -7,12 +7,12 @@ PROC=x86emu
 ifndef __LINUX__
 PLATFORM_CFLAGS=-D__NT__ -D__IDP__ -DWIN32 -DCYGWIN -Os -mno-cygwin -fno-rtti
 PLATFORM_LDFLAGS=--dll -mno-cygwin
-IDALIB=$(shell find ../../ -type d | grep -E "(lib|lib/)gcc.w32")/ida.a
+IDALIB=$(shell find ../../.. -type d | grep -E "(lib|lib/)gcc.w32")/ida.a
 PLUGIN_EXT=.plw
 RC=windres
 else
 PLATFORM_CFLAGS=-D__LINUX__
-IDALIB=$(shell find ../../ -type d | grep -E "(lib|lib/)gcc.lnx")/pro.a
+IDALIB=$(shell find ../../.. -type d | grep -E "(lib|lib/)gcc.lnx")/pro.a
 PLUGIN_EXT=.plx
 endif
 
@@ -27,7 +27,7 @@ EXTRALIBS=-lcomdlg32 -lgdi32 -luser32 -lpsapi -ladvapi32
 RESOURCES=dialog.res
 
 # Destination directory for compiled plugins
-OUTDIR=$(IDA)bin/plugins/
+OUTDIR=$(SDKROOT)bin/plugins/
 
 #list out the object files in your project here
 OBJS=	$(F)x86emu.o \
@@ -57,7 +57,7 @@ $(OUTDIR):
 	-@mkdir -p $(OUTDIR)
 
 CC=g++
-INC=-I$(IDA)include/
+INC=-I$(SDKROOT)include/
 
 $(F)%.res: %.rc
 	$(RC) -O coff $< $@

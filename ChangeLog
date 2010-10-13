@@ -1,3 +1,8 @@
+* 09/20/10
+  Emulator initialization loads .rsrc section if not already loaded
+  Changed format of saved emulator information.  CHANGES ARE NOT 
+  BACKWARD COMPATIBLE WITH PREVIOUS VERSIONS OF EMULATOR.
+
 * 09/19/10
   Added many new emulated Windows functions
   Improved emulation of PEB/TEB fields

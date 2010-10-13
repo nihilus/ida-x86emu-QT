@@ -26,12 +26,16 @@
  *
  */
 
+#ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
 #endif
+#endif
 
+#ifndef _MSC_VER
 #ifndef USE_STANDARD_FILE_FUNCTIONS
 #define USE_STANDARD_FILE_FUNCTIONS 1
+#endif
 #endif
 
 #include <windows.h>
@@ -65,6 +69,7 @@
 #include "elf32.h"
 #include "emu_script.h"
 #include "memmgr.h"
+#include "buffer.h"
 
 #ifndef CYGWIN
 #define strcasecmp stricmp
@@ -101,6 +106,8 @@ static const char x86emu_node_name[] = "$ X86 CPU emulator state";
 static const char funcinfo_node_name[] = "$ X86emu FunctionInfo";
 static const char petable_node_name[] = "$ X86emu PETables";
 static const char module_node_name[] = "$ X86emu ModuleInfo";
+static const char personality_node_name[] = "$ X86emu Personality";
+static const char heap_node_name[] = "$ X86emu Heap";
 
 //The IDA database node identifier into which the plug-in will
 //store its state information when the database is saved.
@@ -108,6 +115,8 @@ static netnode x86emu_node(x86emu_node_name);
 static netnode funcinfo_node(funcinfo_node_name);
 static netnode petable_node(petable_node_name);
 static netnode module_node(module_node_name);
+static netnode personality_node(personality_node_name);
+static netnode heap_node(heap_node_name);
 
 //will contain base address for loaded image.  Use with RVAs
 IMAGE_NT_HEADERS nt;
@@ -187,6 +196,13 @@ dword OSMinorVersion = 1;
 dword OSBuildNumber = 2600;
 
 extern til_t *ti;
+
+void getRandomBytes(void *buf, unsigned int len) {
+   if (hProv == 0) {
+      CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, 0);
+   }
+   CryptGenRandom(hProv, len, (BYTE*)buf);
+}
 
 /*
  * return system as 64 bit quantity representing the number of 
@@ -380,7 +396,7 @@ void doubleClick(HWND edit) {
    unsigned int *reg = toReg(ctl);
    char message[32] = "Enter new value for ";
    char original[16];
-   strcat(message, names[idx]);
+   qstrncat(message, names[idx], sizeof(message));
    qsnprintf(original, sizeof(original), "0x%08X", *reg);
    if (inputBox("Update register", message, original)) {
       dword newVal = strtoul(value, NULL, 0);
@@ -841,7 +857,7 @@ BOOL CALLBACK MemoryDlgProc(HWND hwndDlg, UINT message,
 void memLoadFile(dword start) {
    OPENFILENAME ofn;
    char szFile[260];       // buffer for file name
-   unsigned char buf[512], *ptr;
+   unsigned char buf[512];
    int readBytes;
    dword addr = start;
    memset(&ofn, 0, sizeof(ofn));
@@ -999,7 +1015,7 @@ void grabHeapBlock() {
          return;
       }
       if (size) {
-         dword block = EmuHeap::getHeap()->calloc(size, 1);
+         dword block = HeapBase::getHeap()->calloc(size, 1);
          qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes allocated in the heap at 0x%08.8x", size, block);
          MessageBox(x86Dlg, msg_buf, "Success", MB_OK);
       }
@@ -1143,7 +1159,7 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
          ThreadNode *currThread = activeThread;
          switch (LOWORD(wParam)) { 
             case IDC_HEAP_LIST: {
-               const MallocNode *n = EmuHeap::getHeap()->heapHead();
+               const MallocNode *n = HeapBase::getHeap()->heapHead();
                msg("x86emu: Heap Status ---\n");
                while (n) {
                   unsigned int sz = n->getSize();
@@ -1541,6 +1557,28 @@ void setPEimageBase() {
    }
 }   
 
+void loadResources(FILE *f) {
+   IMAGE_SECTION_HEADER *sh = (IMAGE_SECTION_HEADER*)pe.sections;
+   for (int i = 0; i < pe.num_sections; i++) {
+      if (strcmp((char*)sh[i].Name, ".rsrc") == 0) {
+         dword rsrcBase = pe.base + sh[i].VirtualAddress;
+         segment_t *r = getseg(rsrcBase);
+         if (r == NULL) {   //nothing loaded at rsrcBase address
+            if (fseek(f, sh[i].PointerToRawData, SEEK_SET) == 0) {
+               unsigned int sz = sh[i].SizeOfRawData;
+               unsigned char *rsrc = (unsigned char*)malloc(sz);
+               if (fread(rsrc, sz, 1, f) != 1)  {
+                  free(rsrc);
+                  return;
+               }
+               createSegment(rsrcBase, sh[i].Misc.VirtualSize, rsrc, sz, ".rsrc");
+               free(rsrc);
+            }
+         }
+      }
+   }
+}
+
 dword PELoadHeaders() {
    dword addr = 0;
       
@@ -1589,6 +1627,7 @@ dword PELoadHeaders() {
       FILE *f = LoadHeadersCommon(addr & 0xFFFF0000, s, false);
       if (f) {
          pe.buildThunks(f);
+         loadResources(f);
          fclose(f);
       }
       return addr;
@@ -1622,6 +1661,7 @@ dword PELoadHeaders() {
          free(buf);
    
          pe.buildThunks(f);
+         loadResources(f);
          fclose(f);
          return addr;
       }
@@ -1710,51 +1750,72 @@ void initPebLdrData(dword pebLdrData) {
 //   msg("peb modules added\n");
 }
 
-void createWindowsPEB(dword peb) {
-   MemMgr::mmap(peb, 0x1000, 0, 0, ".peb");
-   patch_long(peb, 0);              //zero out BeingDebugged flag
-   patch_long(peb + 8, peImageBase);
-   dword pebLdrData = peb + 0x200;
-   patch_long(peb + 0xC, pebLdrData);
-   initPebLdrData(pebLdrData);
-//   msg("peb created\n");
+const char *win_xp_env[] = {
+   "ALLUSERSPROFILE=C:\\Documents and Settings\\All Users",
+   "APPDATA=C:\\Documents and Settings\\$USER\\Application Data",
+   "CLIENTNAME=Console",
+   "CommonProgramFiles=C:\\Program Files\\Common Files",
+   "COMPUTERNAME=$HOST",
+   "ComSpec=C:\\WINDOWS\\system32\\cmd.exe",
+   "FP_NO_HOST_CHECK=NO",
+   "HOMEDRIVE=C:",
+   "HOMEPATH=\\Documents and Settings\\$USER",
+   "LOGONSERVER=\\\\$HOST",
+   "NUMBER_OF_PROCESSORS=1",
+   "OS=Windows_NT",
+   "Path=C:\\WINDOWS\\system32;C:\\WINDOWS;C:\\WINDOWS\\System32\\Wbem",
+   "PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH",
+   "PROCESSOR_ARCHITECTURE=x86",
+   "PROCESSOR_IDENTIFIER=x86 Family 6 Model 23 Stepping 10, GenuineIntel",
+   "PROCESSOR_LEVEL=6",
+   "PROCESSOR_REVISION=170a",
+   "ProgramFiles=C:\\Program Files",
+   "PROMPT=$P$G",
+   "SESSIONNAME=Console",
+   "SystemDrive=C:",
+   "SystemRoot=C:\\WINDOWS",
+   "TEMP=C:\\DOCUME~1\\$DOSUSER\\LOCALS~1\\Temp",
+   "TMP=C:\\DOCUME~1\\$DOSUSER\\LOCALS~1\\Temp",
+   "USERDOMAIN=$HOST",
+   "USERNAME=$USER",
+   "USERPROFILE=C:\\Documents and Settings\\$USER",
+   "windir=C:\\WINDOWS",
+   NULL
+};
 
-   patch_long(peb + PEB_TLS_BITMAP, peb + PEB_TLS_BITMAP_BITS);
-   patch_long(peb + PEB_TLS_EXP_BITMAP, peb + PEB_TLS_EXP_BITMAP_BITS);
-
-   patch_long(peb + 0xA4, OSMajorVersion);
-   patch_long(peb + 0xA8, OSMinorVersion);
-   patch_long(peb + 0xAC, OSBuildNumber);
-   patch_long(peb + 0xB0, 2);    //OSPlatformId
+char *replace(char *var, const char *match, const char *sub) {
+   char *res, *find;
+   while (find = strstr(var, match)) {
+      *find = 0;
+      int len = strlen(var) + strlen(sub) - strlen(match) + 1;
+      res = (char*)malloc(len);
+      qsnprintf(res, len, "%s%s%s", var, sub, find + strlen(match));
+      free(var);
+      var = res;
+   }
+   return var;
 }
 
-void createWindowsTEB() {
-   fsBase = 0x7ffdf000;
-   ebx = fsBase - 0x1000;
-   MemMgr::mmap(fsBase, 0x1000, 0, 0, ".teb");
-   createWindowsPEB(ebx);  //results in kernel32 headers getting loaded
-   
-   dword pid = 0;
-   dword tid = 0;
-   CryptGenRandom(hProv, 2, (BYTE*)&pid);
-   CryptGenRandom(hProv, 2, (BYTE*)&tid);
-   pid = (pid % 3000) + 1000;
-   
-   //need to integrate this with the emuthreads stuff
-   tid = (tid % 3000) + 1000;
-   
-   patch_long(fsBase + 4, 0x130000);  //top of stack
-
-   patch_long(fsBase + 0x20, pid);
-   patch_long(fsBase + 0x24, tid);
-
-   patch_long(fsBase, fsBase + 0xf80);  //last chance SEH record
-   patch_long(fsBase + 0xf80, 0xffffffff);  //end of SEH list
-   patch_long(fsBase + 0xf84, myGetProcAddress(myGetModuleHandle("kernel32.dll"), "UnhandledExceptionFilter"));  //kernel32 exception handler
-
-   patch_long(fsBase + 0x18, fsBase);  //teb self pointer
-   patch_long(fsBase + 0x30, ebx);     //peb self pointer   
-//   msg("teb created\n");
+Buffer *makeEnv(const char *env[], const char *userName, const char *hostName) {
+   Buffer *res = new Buffer();
+   for (int i = 0; env[i]; i++) {
+      char *ev = _strdup(env[i]);
+      ev = replace(ev, "$USER", userName);
+      ev = replace(ev, "$HOST", hostName);
+      if (strlen(userName) > 8) {
+         char buf[10];
+         qstrncpy(buf, userName, 6);
+         qstrncpy(buf + 6, "~1", 3);
+         ev = replace(ev, "$DOSUSER", buf);
+      }
+      else {
+         ev = replace(ev, "$DOSUSER", userName);
+      }
+      res->write(ev, strlen(ev) + 1);
+      free(ev);
+   }
+   res->write("", 1);
+   return res;
 }
 
 //notification hook function for idb notifications
@@ -1798,7 +1859,7 @@ void formatStack(dword begin, dword end) {
 #endif
 }
 
-void createWindowsStack() {
+void createWindowsStack(dword top, dword size) {
    esp = 0x130000;
    dword base = esp - 0x4000;
    MemMgr::mmap(base, 0x4000, 0, 0, ".stack");
@@ -1816,6 +1877,121 @@ void createWindowsStack() {
    //need a reliable way to determine the offset into kernel32
    //could just use the address of TerminateProcess
    push(0x16fd7 + k32, SIZE_DWORD);
+}
+
+//possible modify to use CreateThread code for initial thread
+dword createWindowsPEB() {
+   //win2k peb is 7FFDF000
+   //Win 7 PEB addresses range from 0x7ffd3000-0x7ffdf000 by 0x1000
+   //0x7ffde000  is most common PEB address in Vista followed by 0x7ffdf000
+   dword pebBase = 0x7ffdf000;
+   MemMgr::mmap(pebBase, 0x1000, 0, 0, ".peb");
+   patch_long(pebBase, 0);              //zero out BeingDebugged flag
+   patch_long(pebBase + PEB_IMAGE_BASE, peImageBase);
+   
+   dword heapBase = (x86emu_node.altval(X86_MAXEA) + 0x1000) & 0xfffff000;
+   dword heap = addHeapCommon(0x10000, heapBase);
+   patch_long(pebBase + PEB_MAX_HEAPS, (0x1000 - SIZEOF_PEB) / 4);   //0x1000 == PAGE_SIZE
+   patch_long(pebBase + PEB_PROCESS_HEAP, heap);
+   patch_long(pebBase + PEB_NUM_HEAPS, 1);
+   patch_long(pebBase + SIZEOF_PEB + 4, heap);
+   
+   // NEED TO MOVE LdrData out of the PEB
+   // space from end of PEB to end of page is dedicated to 
+   // heap admin
+   dword pebLdrData = pebBase + 0x200;   //usually inside ntdll.dll
+   patch_long(pebBase + PEB_LDR_DATA, pebLdrData);
+   initPebLdrData(pebLdrData);
+//   msg("peb created\n");
+
+   patch_long(pebBase + PEB_TLS_BITMAP, pebBase + PEB_TLS_BITMAP_BITS);
+   patch_long(pebBase + PEB_TLS_EXP_BITMAP, pebBase + PEB_TLS_EXP_BITMAP_BITS);
+
+   //heap needs to be initialized here
+   //env string is sequence of \0 terminated WCHAR pointed to by proc_parms + 0x48
+   //this is allocated in heap
+   //copy environment to this location as WCHAR
+   const char *userName = "Administrator";
+   const char *hostName = "localhost";
+   Buffer *env = makeEnv(win_xp_env, userName, hostName);
+   unsigned int len = env->get_wlen();
+   unsigned char *eb = env->get_buf();
+   dword env_buf = HeapBase::getHeap()->malloc(len * 2);
+   for (unsigned int i = 0; i < len; i++) {
+      patch_word(env_buf + 2 * i, eb[i]);
+   }
+   delete env;
+   
+   //allocate process parameters in heap right after env
+   dword proc_parms = HeapBase::getHeap()->calloc(SIZEOF_PROCESS_PARAMETERS, 1);
+   
+   //command line needs to be pointed to by UNICODE_STRING at proc_parms + 0x40
+   //need interface to accept command line from user
+   const char *cmdLine = "dummy";
+   int cmdLineLen = strlen(cmdLine) + 1;
+   dword cmd_line = HeapBase::getHeap()->malloc(cmdLineLen * 2);
+   //copy command line to this location as WCHAR
+   for (int i = 0; i < cmdLineLen; i++) {
+      patch_word(cmd_line + 2 * i, cmdLine[i]);
+   }
+   pCmdLineA = HeapBase::getHeap()->malloc(cmdLineLen);
+   //copy command line to this location as CHAR
+   for (int i = 0; i < cmdLineLen; i++) {
+      patch_byte(pCmdLineA + i, cmdLine[i]);
+   }
+
+   patch_long(pebBase + PEB_PROCESS_PARMS, proc_parms);
+   patch_word(proc_parms + 0x40, cmdLineLen * 2);
+   patch_word(proc_parms + 0x42, cmdLineLen * 2);
+   patch_long(proc_parms + 0x44, cmd_line);
+   patch_long(proc_parms + PARMS_ENV_PTR, env_buf);
+
+   x86emu_node.altset(EMU_COMMAND_LINE, pCmdLineA);
+
+   patch_long(pebBase + PEB_OS_MAJOR, OSMajorVersion);   //varies with o/s personality
+   patch_long(pebBase + PEB_OS_MINOR, OSMinorVersion);   //varies with o/s personality
+   patch_long(pebBase + PEB_OS_BUILD, OSBuildNumber);   //varies with o/s personality
+   patch_long(pebBase + PEB_OS_PLATFORM_ID, 2);    //OSPlatformId
+   
+   return pebBase;
+}
+
+void createWindowsTEB(dword peb) {   
+   //teb address is highest address not occupied by peb, additional tebs are 
+   //allocated in stack fashion at next lower page in memory, skiping peb page
+   //is necessary
+   ebx = peb;       //peb
+   for (fsBase = 0x7ffdf000; fsBase == peb; fsBase -= 0x1000);   // this is teb address
+   MemMgr::mmap(fsBase, 0x1000, 0, 0, ".teb");
+
+   threadList = activeThread = new ThreadNode();
+   dword tid = activeThread->id;
+   
+   dword pid = 0;
+   getRandomBytes(&pid, 2);
+   pid = (pid % 3000) + 1000;
+   
+   patch_long(fsBase + TEB_PROCESS_ID, pid);
+   patch_long(fsBase + TEB_THREAD_ID, tid);
+
+   patch_long(fsBase, fsBase + 0xf80);  //last chance SEH record
+   patch_long(fsBase + 0xf80, 0xffffffff);  //end of SEH list
+   //need kernel32.dll mapped prior to this
+   patch_long(fsBase + 0xf84, myGetProcAddress(myGetModuleHandle("kernel32.dll"), "UnhandledExceptionFilter"));  //kernel32 exception handler
+
+   patch_long(fsBase + TEB_LINEAR_ADDR, fsBase);  //teb self pointer
+   patch_long(fsBase + TEB_PEB_PTR, ebx);     //peb self pointer   
+   
+   createWindowsStack(0x130000, 0x4000);
+   patch_long(fsBase + TEB_STACK_TOP, 0x130000);     //top of stack   
+   patch_long(fsBase + TEB_STACK_BOTTOM, 0x130000 - 0x4000);     //bottom of stack   
+   
+//   msg("teb created\n");
+}
+
+void createWindowsProcess() {
+   dword peb = createWindowsPEB();
+   createWindowsTEB(peb);
 }
 
 void buildMainArgs() {
@@ -1941,14 +2117,9 @@ void createElfStack() {
    formatStack(base, esp);
 }
 
-void createWindowsHeap() {
-   dword base = (x86emu_node.altval(X86_MAXEA) + 0x1000) & 0xfffff000;
-   MemMgr::mmap(base, 0x10000, 0, 0, ".heap");
-   EmuHeap::initHeap(".heap");
-}
-
 void createElfHeap() {
-   createWindowsHeap();
+   dword base = (x86emu_node.altval(X86_MAXEA) + 0x1000) & 0xfffff000;
+   HeapBase::addHeap(0x10000, base);
 }
 
 bool haveStackSegment() {
@@ -1957,12 +2128,6 @@ bool haveStackSegment() {
 
 bool haveHeapSegment() {
    return get_segm_by_name(".heap") != NULL;
-}
-
-void setBaseTime() {
-   GetSystemTimeAsFileTime(&baseTime);
-   x86emu_node.altset(SYSTEM_TIME_LOW, baseTime.dwLowDateTime);
-   x86emu_node.altset(SYSTEM_TIME_HIGH, baseTime.dwHighDateTime);
 }
 
 //--------------------------------------------------------------------------
@@ -1984,10 +2149,6 @@ void setBaseTime() {
 int idaapi init(void) {
    dword loadStatus;
    cpuInit = false;
-   
-   if (CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, 0) == 0) {
-      msg("CryptAcquireContext failed: 0x%08x\n", GetLastError());
-   }
    
    if (strcmp(inf.procName, "metapc")) return PLUGIN_SKIP;
 //   if ( ph.id != PLFM_386 ) return PLUGIN_SKIP;
@@ -2016,6 +2177,7 @@ int idaapi init(void) {
    // be used.
    //   
    if (netnode_exist(x86emu_node)) {
+      //netnode should only exist if emulator was previously run
       // There's an x86emu node in the database.  Attempt to
       // instantiate the CPU state from it.
       msg("x86emu: Loading x86emu state from existing netnode.\n");
@@ -2025,35 +2187,53 @@ int idaapi init(void) {
          cpuInit = true;
       }
       else {
+         //probably shouldn't continue trying to init emulator at this point
          msg("x86emu: Error restoring x86emu state: %d.\n", loadStatus);
       }
+
       randVal = x86emu_node.altval(X86_RANDVAL);
 
       if (randVal == 0) {
          do {
-            CryptGenRandom(hProv, 4, (BYTE*)&randVal);
+            getRandomBytes(&randVal, 4);
          } while (randVal == 0);
          x86emu_node.altset(X86_RANDVAL, randVal);
       }
 
       baseTime.dwLowDateTime = x86emu_node.altval(SYSTEM_TIME_LOW);
       baseTime.dwHighDateTime = x86emu_node.altval(SYSTEM_TIME_HIGH);
-      if (baseTime.dwLowDateTime == 0) {
-         //in case the time was never set previously
-         setBaseTime();
-      }
    }
    else {
-      x86emu_node.create(x86emu_node_name);
-      x86emu_node.altset(X86_MINEA, inf.minEA);
-      x86emu_node.altset(X86_MAXEA, inf.maxEA);
-      do {
-         CryptGenRandom(hProv, 4, (BYTE*)&randVal);
-      } while (randVal == 0);
-      x86emu_node.altset(X86_RANDVAL, randVal);
-
-      setBaseTime();
       msg("x86emu: No saved x86emu state data was found.\n");
+   }
+   if (netnode_exist(heap_node)) {
+      // There's a heap_node in the database.  Attempt to
+      // instantiate the heap info from it.
+      unsigned char *buf = NULL;
+      dword sz;
+      msg("x86emu: Loading HeapInfo state from existing netnode.\n");
+      Buffer *b = NULL;
+      if ((buf = (unsigned char *)heap_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
+         b = new Buffer(buf, sz);
+      }
+      unsigned int heap = x86emu_node.altval(HEAP_PERSONALITY);
+      switch (heap) {
+         case RTL_HEAP:
+            break;
+         case PHKMALLOC_HEAP:
+            break;
+         case JEMALLOC_HEAP:
+            break;
+         case DLMALLOC_2_7_2_HEAP:
+            break;
+         case LEGACY_HEAP:
+         default:
+            if (b) {
+               EmuHeap::loadHeapLayout(*b);
+            }
+            break;
+      }
+      delete b;
    }
    if (netnode_exist(funcinfo_node)) {
       // There's a funcinfo_node in the database.  Attempt to
@@ -2082,25 +2262,6 @@ int idaapi init(void) {
          petable_node.kill();
       }  
    }
-/*   
-   if (!cpuInit) {
-      if (inf.filetype == f_PE) {
-         enableSEH();
-         //typical values for Windows XP segment registers
-         es = ss = ds = 0x23;   //0x167 for win98
-         cs = 0x1b;             //0x15F for win98
-         fs = 0x38;             //0xE1F for win98
-         //fsBase = 0x7FFDE000;  //need to have 0xFFF bytes allocated here
-         createWindowsHeap();
-         createWindowsStack();
-      }
-      else { //"elf" and others land here
-         createElfStack();
-         createElfHeap();
-      }
-      initProgram(get_screen_ea());
-   }
-*/
    fixed = (HFONT)GetStockObject(ANSI_FIXED_FONT);
 
    setUnemulatedCB(EmuUnemulatedCB);
@@ -2131,7 +2292,9 @@ int idaapi init(void) {
 //      This function won't be called in the case of emergency exits.
 
 void idaapi term(void) {
-   CryptReleaseContext(hProv, 0);
+   if (hProv) {
+      CryptReleaseContext(hProv, 0);
+   }
    unregister_funcs();
    unhook_from_notification_point(HT_UI, uiCallback, NULL);
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
@@ -2162,6 +2325,33 @@ void idaapi term(void) {
 
 void idaapi run(int arg) {
    if (x86Dlg == NULL) {
+      if (!netnode_exist(x86emu_node)) {
+         //save basic info first time we encounter this database
+         //BUT don't mark emulator as initialized
+         //NOTE - should also save original PE headers as a blob at this point
+         //they may not be available by the time the user decides to run the plugin
+         GetSystemTimeAsFileTime(&baseTime);
+         x86emu_node.create(x86emu_node_name);
+         x86emu_node.altset(X86_MINEA, inf.minEA);
+         x86emu_node.altset(X86_MAXEA, inf.maxEA);
+         getRandomBytes(&randVal, 4);
+         x86emu_node.altset(X86_RANDVAL, randVal);
+   
+         x86emu_node.altset(SYSTEM_TIME_LOW, baseTime.dwLowDateTime);
+         x86emu_node.altset(SYSTEM_TIME_HIGH, baseTime.dwHighDateTime);
+         
+         getRandomBytes(&tsc, 6);
+         char *t = (char*)&tsc;
+         t[5] &= 3;              //truncate time somewhat
+      }      
+      
+      //test for presence of personality
+      //show personality dialog based on file type
+      //differs for PE vs ELF
+      //for ELF differs for Linux vs FreeBSD
+      //create personality, heap, peb, teb
+      //choose CPUID features regardless of file type
+      
       if (inf.filetype == f_PE && !netnode_exist(petable_node)) {
          //init some PE specific stuff
          dword headerBase = PELoadHeaders();
@@ -2174,9 +2364,7 @@ void idaapi run(int arg) {
    
             if (pe.valid) {
                msg("pe struct is valid, calling doImports\n");
-               createWindowsTEB();
-               createWindowsHeap();
-               createWindowsStack();
+               createWindowsProcess();
                doImports(pe);
             }
             else {
@@ -2192,18 +2380,13 @@ void idaapi run(int arg) {
          ELFLoadHeaders();
       }
       if (!cpuInit) {
+         dword init_eip = get_screen_ea();
          if (inf.filetype == f_PE) {
             enableSEH();
             //typical values for Windows XP segment registers
             es = ss = ds = 0x23;   //0x167 for win98
             cs = 0x1b;             //0x15F for win98
             fs = 0x38;             //0xE1F for win98
-            //fsBase = 0x7FFDE000;  //need to have 0xFFF bytes allocated here
-/*
-            createWindowsHeap();
-            createWindowsStack();
-            createWindowsTEB();
-*/
             esi = 0xffffffff;
             ecx = esp - 0x14;
             ebp = 0x12fff0;
@@ -2212,9 +2395,13 @@ void idaapi run(int arg) {
             createElfHeap();   //do this first so it goes right after exe
             createElfStack();
             buildElfEnvironment();
+            //create initial thread
+            threadList = activeThread = new ThreadNode();
          }
-         initProgram(get_screen_ea());
+         initProgram(init_eip);
       }
+
+      pCmdLineA = x86emu_node.altval(EMU_COMMAND_LINE);  
 
 #if IDA_SDK_VERSION >= 530
       TForm *stackForm = open_disasm_window("Stack");

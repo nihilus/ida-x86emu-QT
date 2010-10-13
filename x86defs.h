@@ -49,9 +49,11 @@ typedef unsigned char  uchar;
 
 #else   //#ifdef __IDP__
 
+#ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
 #endif  // USE_DANGEROUS_FUNCTIONS
+#endif  //_MSC_VER
 
 #include <ida.hpp>
 #include <idp.hpp>
@@ -315,6 +317,7 @@ typedef uquad  qword;
 #define fpuStackTop ((fpu.status >> 11) & 7)
 
 void getSystemBaseTime(dword *timeLow, dword *timeHigh);
+void getRandomBytes(void *buf, unsigned int len);
 
 extern bool doTrace;
 extern bool doTrack;
@@ -325,6 +328,14 @@ extern unsigned int randVal;
 #ifdef __IDP__
 //if building an IDA plugin, then here are some defines
 
+//heap personality type values
+#define LEGACY_HEAP 100
+#define DLMALLOC_2_7_2_HEAP 101
+#define JEMALLOC_HEAP 102
+#define PHKMALLOC_HEAP 103
+#define RTL_HEAP 104
+
+//various emulator related altval indicies
 #define X86_EMU_INIT 1
 #define HEAP_PERSONALITY 5
 #define OS_PERSONALITY 6
@@ -334,7 +345,8 @@ extern unsigned int randVal;
 #define X86_RANDVAL 12
 #define SYSTEM_TIME_LOW 13
 #define SYSTEM_TIME_HIGH 14
-
+//this would be a kernel32 variable pointing into the heap
+#define EMU_COMMAND_LINE 15
 #endif
 
 #endif

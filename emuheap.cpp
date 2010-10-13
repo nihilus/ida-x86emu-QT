@@ -21,8 +21,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
+#endif
 #endif
 
 #include <ida.hpp>
@@ -32,6 +34,8 @@
 
 #include "emuheap.h"
 #include "memmgr.h"
+
+HeapBase *HeapBase::primaryHeap = NULL;
 
 //Constructor for malloc'ed node
 MallocNode::MallocNode(unsigned int size, unsigned int base) {
@@ -50,7 +54,10 @@ void MallocNode::save(Buffer &b) {
    b.write((char*)&size, sizeof(size));
 }
 
-EmuHeap *EmuHeap::primaryHeap = NULL;
+//need at least one non-inline function from HeapBase so that
+//vtable will get allocated
+HeapBase::~HeapBase() {
+}
 
 //Emulation heap constructor, indicate virtual address of base and max size
 EmuHeap::EmuHeap(unsigned int baseAddr, unsigned int currSize, unsigned int maxSize, EmuHeap *next) {
@@ -99,7 +106,7 @@ EmuHeap::EmuHeap(Buffer &b) {
       b.read((char*)&n, sizeof(n));
       if (p) {
          p->nextHeap = new EmuHeap(b, n);
-         p = p->nextHeap;
+         p = (EmuHeap*)p->nextHeap;
       }
       else {
          readHeap(b, n);
@@ -137,12 +144,12 @@ void EmuHeap::save(Buffer &b) {
    EmuHeap *h;
    
    //count the number of heaps
-   for (h = this; h; h = h->nextHeap) num_heaps++;
+   for (h = this; h; h = (EmuHeap*)h->nextHeap) num_heaps++;
 
    b.write((char*)&num_heaps, sizeof(num_heaps));
    
    //write all of the heaps
-   for (h = this; h; h = h->nextHeap) {
+   for (h = this; h; h = (EmuHeap*)h->nextHeap) {
       h->writeHeap(b);
    }  
 }
@@ -323,7 +330,7 @@ unsigned int EmuHeap::findBlock(unsigned int bsize) {
    return result;
 }
 
-void EmuHeap::saveHeapLayout(Buffer &b) {
+void HeapBase::saveHeapLayout(Buffer &b) {
    primaryHeap->save(b);
 }
 
@@ -336,29 +343,36 @@ void EmuHeap::initHeap(const char *name, unsigned int maxSize) {
 }   
 
 unsigned int EmuHeap::getPrimaryHeap() {
-   return primaryHeap->base;
+   return primaryHeap->getHeapBase();
 }
 
-unsigned int EmuHeap::addHeap(unsigned int maxSize) {
+unsigned int HeapBase::addHeap(unsigned int maxSize, unsigned int base) {
    EmuHeap *h, *p = NULL;
    char buf[16];
    int count = 0;
-   for (h = primaryHeap; h; h = h->nextHeap) {
-      p = h;
-      count++;
+   if (primaryHeap == 0) {
+      MemMgr::mmap(base, 0x10000, 0, 0, ".heap");
+      primaryHeap = new EmuHeap(".heap", maxSize);
+      return base;
    }
-   if (p) {
-      qsnprintf(buf, 16, ".heap%d", count);
-      MemMgr::mmap(p->max, 0x1000, 0, 0, buf);
-      //really need to check maxSize + max here against 0xFFFFFFFF
-      p->nextHeap = new EmuHeap(p->max, 0x1000, maxSize);
+   else {
+      for (h = (EmuHeap*)primaryHeap; h; h = (EmuHeap*)h->nextHeap) {
+         p = h;
+         count++;
+      }
+      if (p) {
+         qsnprintf(buf, 16, ".heap%d", count);
+         MemMgr::mmap(p->max, 0x1000, 0, 0, buf);
+         //really need to check maxSize + max here against 0xFFFFFFFF
+         p->nextHeap = new EmuHeap(p->max, 0x1000, maxSize);
+      }
+      return p ? p->max : 0;
    }
-   return p ? p->max : 0;
 }
 
 unsigned int EmuHeap::destroyHeap(unsigned int handle) {
    EmuHeap *h, *p = NULL;
-   for (h = primaryHeap; h; h = h->nextHeap) {
+   for (h = (EmuHeap*)primaryHeap; h; h = (EmuHeap*)h->nextHeap) {
       if (h->base == handle) break;
       p = h;
    }
@@ -376,9 +390,9 @@ unsigned int EmuHeap::destroyHeap(unsigned int handle) {
    return 0;
 }
 
-EmuHeap *EmuHeap::findHeap(unsigned int handle) {
+HeapBase *EmuHeap::findHeap(unsigned int handle) {
    EmuHeap *h = NULL;
-   for (h = primaryHeap; h; h = h->nextHeap) {
+   for (h = (EmuHeap*)primaryHeap; h; h = (EmuHeap*)h->nextHeap) {
       if (h->base == handle) return h;
    }
    return NULL;

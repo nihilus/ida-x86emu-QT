@@ -174,6 +174,15 @@ void emu_FlsFree(dword addr);
 void emu_FlsGetValue(dword addr);
 void emu_FlsSetValue(dword addr);
 
+void emu_GetEnvironmentStringsA(dword addr);
+void emu_GetEnvironmentStringsW(dword addr);
+void emu_FreeEnvironmentStringsA(dword addr);
+void emu_FreeEnvironmentStringsW(dword addr);
+void emu_GetCommandLineA(dword addr);
+void emu_GetCommandLineW(dword addr);
+
+dword addHeapCommon(unsigned int maxSize, unsigned int base = 0);
+
 enum {
    SYSCALL_FLAVOR_LINUX,
    SYSCALL_FLAVOR_BSD
@@ -218,5 +227,6 @@ typedef enum {NEVER, ASK, ALWAYS} emu_Actions;
 
 extern int emu_alwaysLoadLibrary;
 extern int emu_alwaysGetModuleHandle;
+extern dword pCmdLineA;
 
 #endif

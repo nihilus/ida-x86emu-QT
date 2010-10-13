@@ -76,5 +76,7 @@ struct DllList {
 
 unsigned int loadIntoIdb(FILE *dll);
 void applyPEHeaderTemplates(unsigned int mz_addr);
+void createSegment(unsigned int start, unsigned int size, unsigned char *content, 
+                   unsigned int clen = 0, const char *name = NULL);
 
 #endif

@@ -21,8 +21,10 @@
 #include <windows.h>
 #include <winnt.h>
 
+#ifndef _MSC_VER
 #ifndef USE_STANDARD_FILE_FUNCTIONS
 #define USE_STANDARD_FILE_FUNCTIONS 1
+#endif
 #endif
 
 #ifdef CYGWIN
@@ -101,6 +103,8 @@ typedef enum {R_FAKE = -1, R_NO = 0, R_YES = 1} Reply;
 int emu_alwaysLoadLibrary = ASK;
 int emu_alwaysGetModuleHandle = ASK;
 
+dword pCmdLineA;
+
 //pointer to til we use to extract function info
 til_t *ti = NULL;
 
@@ -145,8 +149,8 @@ HookEntry hookTable[] = {
    {"_wcsset", emu_wcsset},
    {"_strlwr", emu_strlwr},
 
-   {"GetCurrentProcessId", emu_GetCurrentProcessId},
    {"GetCurrentProcess", emu_GetCurrentProcess},
+   {"GetCurrentProcessId", emu_GetCurrentProcessId},
    {"GetCurrentThreadId", emu_GetCurrentThreadId},
    {"GetThreadContext", emu_GetThreadContext},
 
@@ -216,7 +220,7 @@ HookEntry hookTable[] = {
    {"EnterCriticalSection", emu_EnterCriticalSection},
    {"LeaveCriticalSection", emu_LeaveCriticalSection},
    {"DeleteCriticalSection", emu_DeleteCriticalSection},
-   
+
    {"AddVectoredExceptionHandler", emu_AddVectoredExceptionHandler},
    {"RemoveVectoredExceptionHandler", emu_RemoveVectoredExceptionHandler},
 
@@ -234,6 +238,14 @@ HookEntry hookTable[] = {
    {"FlsFree", emu_TlsFree},
    {"FlsGetValue", emu_TlsGetValue},
    {"FlsSetValue", emu_TlsSetValue},
+
+   {"GetEnvironmentStrings", emu_GetEnvironmentStringsA},
+   {"GetEnvironmentStringsA", emu_GetEnvironmentStringsA},
+   {"GetEnvironmentStringsW", emu_GetEnvironmentStringsW},
+   {"FreeEnvironmentStringsA", emu_FreeEnvironmentStringsA},
+   {"FreeEnvironmentStringsW", emu_FreeEnvironmentStringsW},
+   {"GetCommandLineA", emu_GetCommandLineA},
+   {"GetCommandLineW", emu_GetCommandLineW},
 
    {NULL, NULL}
 };
@@ -253,9 +265,10 @@ char *checkModuleExtension(char *module) {
    char *dot = strchr(module, '.');
    int len = strlen(module);
    if (dot == NULL) {
-      result = (char*)realloc(module, len + 5);
+      int newlen = len + 5;
+      result = (char*)realloc(module, newlen);
       if (result) {
-         strcat(result, ".dll");
+         qstrncat(result, ".dll", newlen);
       }
    }
    else {
@@ -334,7 +347,7 @@ FakedImport *addFakedImport(HandleList *mod, char *procName) {
    ff = (FakedImport*)malloc(sizeof(FakedImport));
    ff->next = fakedImportList;
    ff->addr = mod->maxAddr++;
-   ff->name = strdup(procName);
+   ff->name = _strdup(procName);
    ff->handle = mod->handle;
    fakedImportList = ff;
    return ff;
@@ -606,7 +619,7 @@ HandleList *addModule(const char *mod, bool loading, int id) {
       m = (HandleList*) calloc(1, sizeof(HandleList));
       m->next = moduleHead;
       moduleHead = m;
-      m->moduleName = strdup(mod);
+      m->moduleName = _strdup(mod);
       m->handle = (dword) h;
       if (h & FAKE_HANDLE_BASE) {
          //faked module with no loaded export table
@@ -829,6 +842,52 @@ void unemulated(dword addr) {
    get right at their parameters on top of the stack.
 */
 
+void emu_GetCommandLineA(dword addr) {
+   eax = pCmdLineA;
+}
+
+void emu_GetCommandLineW(dword addr) {
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+   eax = readDword(pp + PARMS_CMD_LINE + 4);
+}
+
+void emu_FreeEnvironmentStringsA(dword addr) {
+   dword env = pop(SIZE_DWORD);
+   eax = HeapBase::getHeap()->free(env) ? 1 : 0;
+}
+
+void emu_FreeEnvironmentStringsW(dword addr) {
+   pop(SIZE_DWORD);
+   eax = 1;
+}
+
+void emu_GetEnvironmentStringsA(dword addr) {
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+   dword wenv = readDword(pp + PARMS_ENV_PTR);
+   unsigned int len = 0;
+   while (1) {
+      while (get_word(wenv + len * 2)) {
+         len++;
+      }
+      if (get_word(wenv + len * 2)) {
+         len++;
+         break;
+      }      
+   }
+   eax = HeapBase::getHeap()->malloc(len);
+   for (unsigned int i = 0; i < len; i++) {
+      patch_byte(eax + i, get_word(wenv + i * 2));
+   }
+}
+
+void emu_GetEnvironmentStringsW(dword addr) {
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+   eax = readDword(pp + PARMS_ENV_PTR);
+}
+
 void emu_FlsAlloc(dword addr) {
    //for now this forwards to TlsAlloc
    pop(SIZE_DWORD);  //discard callback func argument
@@ -859,7 +918,7 @@ void emu_TlsAlloc(dword addr) {
 
    dword exp = readDword(fsBase + TEB_TLS_EXPANSION);
    if (exp == 0) {
-      exp = EmuHeap::getHeap()->calloc(0x1000, 1);
+      exp = HeapBase::getHeap()->calloc(0x1000, 1);
       writeDword(fsBase + TEB_TLS_EXPANSION, exp);
    }
    if (exp == 0) {
@@ -972,7 +1031,7 @@ void emu_TlsSetValue(dword addr) {
       dword exp = readDword(fsBase + TEB_TLS_EXPANSION);
       dwTlsIndex -= 64;
       if (exp == 0) {
-         exp = EmuHeap::getHeap()->calloc(0x1000, 1);
+         exp = HeapBase::getHeap()->calloc(0x1000, 1);
          writeDword(fsBase + TEB_TLS_EXPANSION, exp);
       }
       if (exp) {
@@ -1034,7 +1093,7 @@ void emu_InitializeCriticalSectionAndSpinCount(dword addr) {
    dword spinCount = pop(SIZE_DWORD);
    initCriticalSection(lpCriticalSection, spinCount);
    //add lpCriticalSection to list of active critical sections
-
+   
    //prior to vista return os 0 for fail, 1 for success
    //vista+ always returns 1
    eax = 1;
@@ -1570,7 +1629,8 @@ void emu_QueryPerformanceCounter(dword addr) {
 }
 
 void emu_IsDebuggerPresent(dword addr) {
-   eax = 0;
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   eax = get_byte(peb + 2);
    msg("x86emu: IsDebuggerPresent called\n");
 }
 
@@ -1836,6 +1896,28 @@ void emu_CreateThread(dword addr) {
    
    ThreadNode *tn = emu_create_thread(lpStartAddress, lpParameter);
    
+   dword newTeb = tn->regs.segBase[FS];
+   //read some fields from current thread
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pid = readDword(fsBase + TEB_PROCESS_ID);
+   dword lastChance = readDword(fsBase + 0xf84);
+   
+   dword top = tn->regs.general[ESP] + 32;
+
+   patch_long(newTeb + TEB_PROCESS_ID, pid);
+   patch_long(newTeb + TEB_THREAD_ID, tn->id);
+
+   patch_long(newTeb, newTeb + 0xf80);  //last chance SEH record
+   patch_long(newTeb + 0xf80, 0xffffffff);  //end of SEH list
+   //need kernel32.dll mapped prior to this
+   patch_long(newTeb + 0xf84, lastChance);  //kernel32 exception handler
+
+   patch_long(newTeb + TEB_LINEAR_ADDR, newTeb);  //teb self pointer
+   patch_long(newTeb + TEB_PEB_PTR, peb);     //peb self pointer   
+   
+   patch_long(newTeb + TEB_STACK_TOP, top);     //top of stack   
+   patch_long(newTeb + TEB_STACK_BOTTOM, top - 0x1000);     //bottom of stack   
+   
    if (lpThreadId) {
       writeMem(lpThreadId, tn->id, SIZE_DWORD);
    }
@@ -1843,29 +1925,53 @@ void emu_CreateThread(dword addr) {
    msg("x86emu: CreateThread called: ThreadFunc is 0x%x\n", lpStartAddress);
 }
 
+//this is a heap allocation routine that alsow updates a 
+//windows PEB
+dword addHeapCommon(unsigned int maxSize, unsigned int base) {
+   if (fsBase) {
+      dword peb = readDword(fsBase + TEB_PEB_PTR);
+      dword num_heaps = readDword(peb + PEB_NUM_HEAPS);
+      dword max_heaps = readDword(peb + PEB_MAX_HEAPS);
+      if (num_heaps < max_heaps) {
+         dword res = HeapBase::addHeap(maxSize, base);
+         writeDword(peb + PEB_NUM_HEAPS, num_heaps + 1);
+         writeDword(peb + SIZEOF_PEB + 4 * num_heaps, res);
+         return res;
+      }
+      else {
+         setThreadError(0xc0000017);
+         return 0;
+      }
+   }
+   return HeapBase::addHeap(maxSize, base);
+}
+
 void emu_HeapCreate(dword addr) {
+   //need to test PEB_NUM_HEAPS against PEB_MAX_HEAPS ??
+   
    /* DWORD flOptions =*/ pop(SIZE_DWORD); 
    /* SIZE_T dwInitialSize =*/ pop(SIZE_DWORD);
    dword dwMaximumSize = pop(SIZE_DWORD);
    //we are not going to try to do growable heaps here
    if (dwMaximumSize == 0) dwMaximumSize = 0x01000000;
-   eax = EmuHeap::addHeap(dwMaximumSize);
+   eax = HeapBase::getHeap()->addHeap(dwMaximumSize);
+   //save eax into PEB and update PEB_NUM_HEAPS ??
 }
 
 void emu_HeapDestroy(dword addr) {
    dword hHeap = pop(SIZE_DWORD); 
-   eax = EmuHeap::destroyHeap(hHeap);
+   eax = HeapBase::getHeap()->destroyHeap(hHeap);
 }
 
 void emu_GetProcessHeap(dword addr) {
-   eax = EmuHeap::getPrimaryHeap();
+   eax = HeapBase::getHeap()->getPrimaryHeap();
 }
 
 void emu_HeapAlloc(dword addr) {
    dword hHeap = pop(SIZE_DWORD); 
    /* DWORD dwFlags =*/ pop(SIZE_DWORD);
    dword dwBytes = pop(SIZE_DWORD);
-   EmuHeap *h = EmuHeap::findHeap(hHeap);
+   EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    //are HeapAlloc  blocks zero'ed?
    eax = h ? h->calloc(dwBytes, 1) : 0;
 }
@@ -1874,19 +1980,19 @@ void emu_HeapFree(dword addr) {
    dword hHeap = pop(SIZE_DWORD); 
    /* DWORD dwFlags =*/ pop(SIZE_DWORD);
    dword lpMem = pop(SIZE_DWORD);
-   EmuHeap *h = EmuHeap::findHeap(hHeap);
+   EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    eax = h ? h->free(lpMem) : 0;
 }
 
 void emu_GlobalAlloc(dword addr) {
    /*dword uFlags =*/ pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->calloc(dwSize, 1);
 }
 
 void emu_GlobalFree(dword addr) {
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->free(pop(SIZE_DWORD));
 }
 
@@ -1956,12 +2062,12 @@ void emu_VirtualProtect(dword addr) {
 void emu_LocalAlloc(dword addr) {
    /*dword uFlags =*/ pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(dwSize);
 }
 
 void emu_LocalFree(dword addr) {
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->free(pop(SIZE_DWORD));
 }
 
@@ -2281,22 +2387,22 @@ void emu_LoadLibraryW(dword addr) {
 }
 
 void emu_malloc(dword addr) {
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(readDword(esp));
 }
 
 void emu_calloc(dword addr) {
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->calloc(readDword(esp), readDword(esp + 4));
 }
 
 void emu_realloc(dword addr) {
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->realloc(readDword(esp), readDword(esp + 4));
 }
 
 void emu_free(dword addr) {
-   EmuHeap *p = EmuHeap::getHeap();
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    p->free(readDword(esp));
 }
 
@@ -2382,7 +2488,7 @@ char *reverseLookupExport(dword addr) {
       if (hl->handle & FAKE_HANDLE_BASE) {
          FakedImport *f = findFakedImportByAddr(hl, addr);
          if (f) {
-            fname = strdup(f->name);
+            fname = _strdup(f->name);
          }
       }
       else {
@@ -2401,8 +2507,9 @@ char *reverseLookupExport(dword addr) {
 
 FunctionInfo *newFunctionInfo(const char *name) {
    FunctionInfo *f = (FunctionInfo*)calloc(1, sizeof(FunctionInfo));
-   f->fname = (char*)malloc(strlen(name) + 1);
-   strcpy(f->fname, name);
+   int len = strlen(name) + 1;
+   f->fname = (char*)malloc(len);
+   qstrncpy(f->fname, name, len);
    f->next = functionInfoList;
    functionInfoList = f;
    return f;
@@ -2483,12 +2590,13 @@ char *getFunctionPrototype(FunctionInfo *f) {
       type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
       if (ret) {
          print_type_to_one_line(buf, sizeof(buf), ti, rettype);
-         result = strdup(buf);
+         result = _strdup(buf);
       }
-      result = (char*)realloc(result, strlen(result) + 3 + strlen(f->fname));
-      strcat(result, " ");
-      strcat(result, f->fname);
-      strcat(result, "(");
+      int len = strlen(result) + 3 + strlen(f->fname);
+      result = (char*)realloc(result, len);
+      qstrncat(result, " ", len);
+      qstrncat(result, f->fname, len);
+      qstrncat(result, "(", len);
 
       if (f->stackItems) {
          build_funcarg_arrays(f->type, f->fields, arglocs,
@@ -2497,14 +2605,16 @@ char *getFunctionPrototype(FunctionInfo *f) {
       for (unsigned int i = 0; i < f->stackItems; i++) {
          //change to incorporate what we know from Ida
          print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
-         result = (char*)realloc(result, strlen(result) + 3 + strlen(buf));
+         len = strlen(result) + 3 + strlen(buf);
+         result = (char*)realloc(result, len);
          if (i) {
-            strcat(result, ",");
+            qstrncat(result, ",", len);
          }
-         strcat(result, buf);
+         qstrncat(result, buf, len);
       }
-      result = (char*)realloc(result, strlen(result) + 2);
-      strcat(result, ")");
+      len = strlen(result) + 2;
+      result = (char*)realloc(result, len);
+      qstrncat(result, ")", len);
 
       if (f->stackItems) {
          free_funcarg_arrays(types, names, f->stackItems);   
@@ -2520,7 +2630,7 @@ char *getFunctionReturnType(FunctionInfo *f) {
       type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
       if (ret) {
          print_type_to_one_line(buf, sizeof(buf), ti, rettype);
-         return strdup(buf);
+         return _strdup(buf);
       }
    }
    return NULL;

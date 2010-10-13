@@ -285,7 +285,7 @@ void setInterruptGate(dword base, dword interrupt_number,
 }
 
 void initIDTR() {
-   cpu.idtr.base = EmuHeap::getHeap()->calloc(0x200, 1);
+   cpu.idtr.base = HeapBase::getHeap()->calloc(0x200, 1);
    cpu.idtr.limit = 0x200;
    if (usingSEH()) {
       setInterruptGate(cpu.idtr.base, 0, cs, SEH_MAGIC);
@@ -305,6 +305,7 @@ int saveState(netnode &f) {
    dword sz;
 //   Buffer b(CPU_VERSION);
    Buffer b;
+   int personality = f.altval(HEAP_PERSONALITY);
 
    //need to start writing version magic as first 4 bytes
    //current registers for active thread are saved here
@@ -321,7 +322,29 @@ int saveState(netnode &f) {
    b.write((char*)&tsc, sizeof(tsc));
    b.write((char*)&importSavePoint, sizeof(importSavePoint));
 
-   EmuHeap::saveHeapLayout(b);
+   if (personality == 0) {
+      HeapBase::getHeap()->save(b);
+   }
+   else {
+      Buffer hb;
+      netnode hn("$ X86emu Heap");
+      HeapBase::getHeap()->save(hb);
+
+      if (!hb.has_error()) {
+         unsigned char *hbuf = NULL;
+         // Delete any previous blob data in the IDA database node.
+         //
+         hn.delblob(0, 'B');
+         //
+         // Convert the output blob object into a buffer and
+         // store it in the database node.
+         //
+         dword hsz = hb.get_wlen();
+      //   msg("x86emu: writing blob of size %d.\n", sz);
+         hbuf = hb.get_buf();
+         hn.setblob(hbuf, hsz, 0, 'B');
+      }      
+   }
 
 /* VERSION(0)
    saveHookList(b);
@@ -348,7 +371,7 @@ int saveState(netnode &f) {
       tn->save(b, activeThread->handle != tn->handle);
    }
 
-   saveSEHState(b);
+   saveVEHState(b);
 
    if (!b.has_error()) {
    //
@@ -415,6 +438,7 @@ int loadState(netnode &f) {
    unsigned char *buf = NULL;
    unsigned int peek;
    dword sz;
+   int personality = f.altval(HEAP_PERSONALITY);
    // Fetch the blob attached to the node.
    if ((buf = (unsigned char *)f.getblob(NULL, &sz, 0, 'B')) == NULL) return X86EMULOAD_NO_NETNODE;
 //   msg("x86emu: netnode found, sz = %d.\n", sz);
@@ -446,30 +470,31 @@ int loadState(netnode &f) {
    b.read((char*)&peek, sizeof(peek));
    b.rewind(4);   //back it up
 
-   if (peek < 0x10000) {
-      //small number indicates this is probably the number of heaps
-      //which is indicative of new format
-      EmuHeap::loadHeapLayout(b);
-   }
-   else {
-      //try to parse old MemoryManager format
-      unsigned int x;
-      b.read((char*)&x, sizeof(x));  //skip 2 ints
-      b.read((char*)&x, sizeof(x));
-      //stack info is next
-      //read stack info
-      segment_t *s = get_segm_by_name(".stack");
-      if (s == NULL) { //it should since this appears to be old style
-         createLegacyStack(b);
+   if (personality == 0) {
+      if (peek < 0x10000) {
+         //small number indicates this is probably the number of heaps
+         //which is indicative of new format
+         EmuHeap::loadHeapLayout(b);
       }
-      //heap info is next
-      //read heap info
-      s = get_segm_by_name(".heap");
-      if (s == NULL) { //it should since this appears to be old style
-         createLegacyHeap(b);
+      else {
+         //try to parse old MemoryManager format
+         unsigned int x;
+         b.read((char*)&x, sizeof(x));  //skip 2 ints
+         b.read((char*)&x, sizeof(x));
+         //stack info is next
+         //read stack info
+         segment_t *s = get_segm_by_name(".stack");
+         if (s == NULL) { //it should since this appears to be old style
+            createLegacyStack(b);
+         }
+         //heap info is next
+         //read heap info
+         s = get_segm_by_name(".heap");
+         if (s == NULL) { //it should since this appears to be old style
+            createLegacyHeap(b);
+         }
       }
    }
-
    loadHookList(b);
    loadModuleList(b);
 
@@ -520,7 +545,7 @@ int loadState(netnode &f) {
          msg("x86emu: active: %x, active->handle: %x\n", activeThread, activeThread ? activeThread->handle : 0);
 */
          msg("x86emu: loaded %d threads from saved state\n", threadCount);
-
+         
          loadVEHState(b);
       }
       else {
@@ -574,18 +599,8 @@ void resetCpu() {
 }
 
 void initProgram(unsigned int entry) {
-/*
-   segment_t *s = get_segm_by_name(".stack");
-   if (s == NULL) {
-      //error NULL stack seg
-      msg("failed to locate stack segment\n");
-   }
-   esp = s->endEA;
-*/
    cpu.eip = entry;
    initIDTR();
-   //create initial thread
-   threadList = activeThread = new ThreadNode();
 }
 
 //sign extension functions
@@ -2232,7 +2247,6 @@ int doThirteen() {
    short *i16 = NULL;
    quad *i64 = NULL;
    int i32[3];
-   unsigned int val;
    long double dbl;
    if (op > 7) {
       fetchOperands(&dest, &source);
@@ -3101,7 +3115,7 @@ int doThirteen() {
                   //source.addr is qword*
                   i32[0] = readMem(source.addr, SIZE_DWORD);
                   i32[1] = readMem(source.addr + 4, SIZE_DWORD);
-                  fpuPush(*i64);
+                  fpuPush(*fp80);
                   fpuSetPointers(source.addr, 0xDF00 | dest.modrm);
                   break;
                case 6:    //FBSTP
@@ -5054,7 +5068,7 @@ int doEscape() {
                   if (r & 0x100) {
                      r = 0xFF;
                   }
-                  d[i] = r;
+                  d[i] = (unsigned char)r;
                }
                break;
             }
@@ -5439,7 +5453,7 @@ int doEscape() {
                         r = 0x7F;
                      }
                   }
-                  d[i] = r;
+                  d[i] = (unsigned char)r;
                }
                break;
             }

@@ -18,8 +18,10 @@
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
+#endif
 #endif
 
 #include "x86defs.h"
@@ -28,25 +30,36 @@
 #include "memmgr.h"
 
 #include <segment.hpp>
+#include <bytes.hpp>
 
 #define DEFAULT_STACK_SIZE 0x100000
 
 ThreadNode *threadList = NULL;
 ThreadNode *activeThread = NULL;
 
-
 /*
  * Figure out a new, unused thread id to assign to the new thread
  */
 dword getNewThreadHandle() {
-   return threadList ? (threadList->handle + 1) : THREAD_HANDLE_BASE;  
+   return threadList ? (threadList->handle + 4) : THREAD_HANDLE_BASE;  
 }
 
 /*
  * Figure out a new, unused thread id to assign to the new thread
  */
 dword getNewThreadId() {
-   return threadList ? (threadList->id + 1) : THREAD_ID_BASE;  
+   dword tid = 0;
+   do {
+      getRandomBytes(&tid, 2);
+      tid = (tid % 3000) + 1000;
+      for (ThreadNode *tn = threadList; tn; tn = tn->next) {
+         if (tn->id == tid) {
+            tid = 0;
+            break;
+         }
+      }
+   } while (tid == 0);   
+   return tid;
 }
 
 /*
@@ -96,7 +109,36 @@ ThreadNode::ThreadNode(dword threadFunc, dword threadArg) {
    regs.general[ESP] = top = getNewStackLocation();
    //the rest should really only be done for Windows binaries
    if (usingSEH()) {
-      regs.segBase[FS] = top - 16;
+      char buf[32];
+      dword teb = get_long(fsBase + TEB_LINEAR_ADDR);
+      dword peb = get_long(teb + TEB_PEB_PTR);
+      dword newTeb = 0x7ffdf000;
+      dword prev;
+      do {
+         prev = newTeb;
+         if (newTeb == peb || newTeb == fsBase) {
+            newTeb -= 0x1000;
+         }
+         else {
+            for (ThreadNode *tn = threadList; tn; tn = tn->next) {
+               if (newTeb == tn->regs.segBase[FS]) {
+                  newTeb -= 0x1000;
+               }
+            }
+         }
+      } while (newTeb != prev);
+      regs.segBase[FS] = newTeb;
+      qsnprintf(buf, sizeof(buf), ".teb_%x", handle);
+      if (getseg(newTeb)) {
+         //clear previously used page
+         for (int i = 0; i < 0x1000; i += 4) {
+            patch_long(newTeb + i, 0);
+         }
+      }
+      else {
+         //map a page in for the new teb
+         MemMgr::mmap(newTeb, 0x1000, 0, 0, buf);
+      }
       regs.general[ESP] -= 32;
    }
 }

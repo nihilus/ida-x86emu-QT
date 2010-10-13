@@ -17,12 +17,16 @@
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
 #endif
+#endif
 
+#ifndef _MSC_VER
 #ifndef USE_STANDARD_FILE_FUNCTIONS
 #define USE_STANDARD_FILE_FUNCTIONS 1
+#endif
 #endif
 
 #include <windows.h>
@@ -93,7 +97,8 @@ void applyPEHeaderTemplates(unsigned int mz_addr) {
    }
 }
 
-void createSegment(unsigned int start, unsigned int size, unsigned char *content) {
+void createSegment(unsigned int start, unsigned int size, unsigned char *content, 
+                   unsigned int clen, const char *name) {
    segment_t s;
    //create ida segment to hold headers
    memset(&s, 0, sizeof(s));
@@ -105,13 +110,13 @@ void createSegment(unsigned int start, unsigned int size, unsigned char *content
    s.bitness = 1;
    s.type = SEG_DATA;
    s.color = DEFCOLOR;
-   if (add_segm_ex(&s, NULL, "DATA", ADDSEG_QUIET | ADDSEG_NOSREG)) {
+   if (add_segm_ex(&s, name, "DATA", ADDSEG_QUIET | ADDSEG_NOSREG)) {
       //zero out the newly created segment
       for (ea_t ea = s.startEA; ea < s.endEA; ea++) {
          patch_byte(ea, 0);
       }
       if (content) {
-         patch_many_bytes(s.startEA, content, size);
+         patch_many_bytes(s.startEA, content, clen ? clen : size);
       }
 //      msg("segment created %x-%x\n", s.startEA, s.endEA);
    }
@@ -181,10 +186,12 @@ void PETables::setSectionHeaders(unsigned int nsecs, IMAGE_SECTION_HEADER *ish) 
    //bss type segments are zero filled by operating system loader
    for (unsigned short i = 0; i < num_sections; i++) {
       if (sections[i].SizeOfRawData < sections[i].Misc.VirtualSize) {
+//      if (sections[i].SizeOfRawData == 0 && sections[i].Misc.VirtualSize) {
          ea_t sbase = sections[i].VirtualAddress + base;
          segment_t *seg = getseg(sbase);
          if (seg) {
             ea_t ea;
+            //zero from end of raw data to end of section
             for (ea = seg->startEA + sections[i].SizeOfRawData; ea < (seg->endEA - 3); ea += 4) {
                patch_long(ea, 0);
             }

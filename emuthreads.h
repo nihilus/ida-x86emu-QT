@@ -26,7 +26,7 @@
 
 #define THREAD_MAGIC 0xDEADBEEF
 #define THREAD_ID_BASE 0x500
-#define THREAD_HANDLE_BASE 0x700
+#define THREAD_HANDLE_BASE 0xdc
 
 class ThreadNode {
 public:
@@ -101,5 +101,12 @@ ThreadNode *findThread(dword handle);
 #define PEB_TLS_EXP_BITMAP_BITS 0x154
 
 #define SIZEOF_PEB 0x1E8
+
+//PEB_CMD_LINE points to a UNICODE_STRING
+#define PARMS_CMD_LINE 0x40
+#define PARMS_ENV_PTR  0x48
+
+#define SIZEOF_PROCESS_PARAMETERS 0x290
+
 
 #endif
