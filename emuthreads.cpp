@@ -1,7 +1,7 @@
 /*
    Source for x86 emulator IdaPro plugin
    File: emuthreads.cpp
-   Copyright (c) 2006, Chris Eagle
+   Copyright (c) 2006-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -78,7 +78,7 @@ dword getNewStackLocation() {
       top += 0x10000;
       count++;
    }
-   qsnprintf(buf, sizeof(buf), ".stack%d", count);
+   ::qsnprintf(buf, sizeof(buf), ".stack%d", count);
    MemMgr::mmap(top - 0xFFFF, 0x1000, 0, 0, buf);
    return top + 1;
 }
@@ -128,7 +128,7 @@ ThreadNode::ThreadNode(dword threadFunc, dword threadArg) {
          }
       } while (newTeb != prev);
       regs.segBase[FS] = newTeb;
-      qsnprintf(buf, sizeof(buf), ".teb_%x", handle);
+      ::qsnprintf(buf, sizeof(buf), ".teb_%x", handle);
       if (getseg(newTeb)) {
          //clear previously used page
          for (int i = 0; i < 0x1000; i += 4) {
@@ -143,7 +143,7 @@ ThreadNode::ThreadNode(dword threadFunc, dword threadArg) {
    }
 }
 
-ThreadNode::ThreadNode(Buffer &b, dword currentActive) {
+ThreadNode::ThreadNode(Buffer &b, dword /*currentActive*/) {
    next = NULL;
    b.read((char*)&handle, sizeof(handle));
    b.read((char*)&id, sizeof(id));
@@ -152,7 +152,7 @@ ThreadNode::ThreadNode(Buffer &b, dword currentActive) {
    b.read((char*)&regs, sizeof(regs));
 }
    
-void ThreadNode::save(Buffer &b, bool saveStack) {
+void ThreadNode::save(Buffer &b, bool /*saveStack*/) {
    b.write((char*)&handle, sizeof(handle));
    b.write((char*)&id, sizeof(id));
    b.write((char*)&hasStarted, sizeof(hasStarted));

@@ -1,7 +1,7 @@
 /*
    Source for x86 emulator IdaPro plugin
    File: emufuncs.cpp
-   Copyright (c) 2004, Chris Eagle
+   Copyright (c) 2004-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -18,23 +18,25 @@
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifdef __NT__
+
 #include <windows.h>
 #include <winnt.h>
 
-#ifndef _MSC_VER
-#ifndef USE_STANDARD_FILE_FUNCTIONS
-#define USE_STANDARD_FILE_FUNCTIONS 1
-#endif
+#else 
+
+#include <wctype.h>
+#include "image.h"
+
 #endif
 
-#ifdef CYGWIN
-#include <psapi.h>
-#endif
+#include <ctype.h>
 
 #ifdef PACKED
 #undef PACKED
 #endif
 
+#include "x86emu_ui.h"
 #include "cpu.h"
 #include "context.h"
 #include "emufuncs.h"
@@ -85,7 +87,7 @@ static HandleList *moduleHead = NULL;
 static FunctionInfo *functionInfoList = NULL;
 
 static FakedImport *fakedImportList = NULL;
-static dword fakedImportAddr = 1;
+//static dword fakedImportAddr = 1;
 
 //stick dummy values up in kernel space to distinguish them from
 //actual library handles
@@ -304,6 +306,7 @@ HandleList *findModuleByHandle(dword handle) {
    return hl;
 }
 
+/*
 unsigned int getPEoffset(HMODULE mod) {
    IMAGE_DOS_HEADER *hdr = (IMAGE_DOS_HEADER*) mod;
    if (mod >= (HMODULE)FAKE_HANDLE_BASE) return 0;
@@ -322,6 +325,7 @@ IMAGE_NT_HEADERS *getPEHeader(HMODULE mod) {
    }
    return pe;
 }
+*/
 
 //find an existing faked import
 FakedImport *findFakedImportByAddr(HandleList *mod, dword addr) {
@@ -431,7 +435,7 @@ void insertHead(dword listHead, dword mod, int doff) {
       blink = flink;
    }
    flink = get_long(listHead);
-   dword back = get_long(flink + 4);
+   /*dword back =*/ get_long(flink + 4);
    patch_long(flink + 4, modFlink);
    patch_long(modFlink + 4, listHead);  //point mod back to head
    patch_long(modFlink, flink);  //point mod fwd to former head
@@ -573,6 +577,72 @@ void addModuleToPeb(dword handle, const char *name, bool loading) {
    }
 }
 
+static void saveString(int which, char *str) {
+#ifdef __IDP__   
+   //only do something if we are in a plugin
+   x86emu_node.supset(which, str);
+#endif
+}
+
+static int loadString(int which, char *dir, int len) {
+#ifdef __IDP__
+   //only do something if we are in a plugin
+   if (len) {
+      *dir = 0;
+   }
+   return x86emu_node.supstr(which, dir, len);
+#else
+   return -1;
+#endif
+}
+
+static void saveDllDir(char *dir) {
+   saveString(SYS_DLL_DIR, dir);
+}
+
+static int getSavedDllDir(char *dir, int len) {
+   //only do something if we are in a plugin
+   return loadString(SYS_DLL_DIR, dir, len);
+}
+
+static void savelastDir(char *dir) {
+   saveString(LAST_DIR, dir);
+}
+
+static int getLastDir(char *dir, int len) {
+   //only do something if we are in a plugin
+   return loadString(LAST_DIR, dir, len);
+}
+
+#ifndef __NT__
+
+int GetSystemDirectory(char *dir, int size) {
+   static char dllDir[512];
+   if (dllDir[0] == 0) {
+      char *dir = getDirectoryName("Choose System DLL Directory", dllDir, sizeof(dllDir));
+      if (dir == NULL) {
+         dllDir[0] = 0;
+      }
+   }
+   int len = strlen(dllDir);
+   ::qstrncpy(dir, dllDir, size);
+   return len;
+}
+
+#endif
+
+int getSystemDllDirectory(char *dir, int size) {
+   int len = getSavedDllDir(dir, size);
+   if (len == -1) {
+      len = GetSystemDirectory(dir, size);
+      if (len > 0) {
+         saveDllDir(dir);
+      }
+   }
+   msg(PLUGIN_NAME": setting system dll directory to %s\n", dir);
+   return len;
+}
+
 HandleList *addModule(const char *mod, bool loading, int id) {
    msg("x86emu: addModule called for %s\n", mod);
    HandleList *m = findModuleByName(mod);
@@ -585,23 +655,43 @@ HandleList *addModule(const char *mod, bool loading, int id) {
          h = id;
       }
       if (h == 0) {
-         len = GetSystemDirectory(module_name, sizeof(module_name));
-         module_name[len++] = '\\';
+         len = getSystemDllDirectory(module_name, sizeof(module_name));
+         module_name[len++] = DIR_SEP;
          module_name[len] = 0;
-#if IDA_SDK_VERSION < 480
-         strncat(module_name, mod, sizeof(module_name) - len - 1);
-#else
-         qstrncat(module_name, mod, sizeof(module_name) - len - 1);
-#endif
-         module_name[sizeof(module_name) - 1] = 0;
+         ::qstrncat(module_name, mod, sizeof(module_name));
          FILE *f = fopen(module_name, "rb");
+         if (f == NULL) {   //try it in lower case
+            for (int i = len; module_name[i]; i++) {
+               module_name[i] = tolower(module_name[i]);
+            }
+            f = fopen(module_name, "rb");
+         }
          if (f == NULL) {
             int load = R_YES;
             load = askbuttons_c("Yes", "No", "Fake it", 1, "Could not locate %s. Locate it now?", mod);
             if (load == R_YES) {
-               char *fname = askfile_c(false, mod, "Please locate dll %s", mod);
+               char title[128];
+               char lastDir[260];
+               getLastDir(lastDir, sizeof(lastDir));
+               ::qstrncpy(module_name, mod, sizeof(module_name));
+#ifndef __QT__
+               const char *filter = "All (*.*)\0*.*\0";
+#else
+               const char *filter = "All (*.*)";
+#endif
+               ::qsnprintf(title, sizeof(title), "Open %s", mod);
+               char *fname = getOpenFileName(title, module_name, sizeof(module_name), filter, lastDir);
                if (fname) {
                   f = fopen(fname, "rb");
+                  char *end = strrchr(module_name, DIR_SEP);
+                  if (end) {
+                     *end = 0;
+                     savelastDir(module_name);
+                     msg(PLUGIN_NAME": saved directory %s\n", module_name);
+                  }
+               }
+               else {
+                  //change to no or fake it option at this point?
                }
             }
          }
@@ -768,7 +858,7 @@ char *getString(dword addr) {
    byte *str = NULL, ch;
    str = (byte*) malloc(size);
    if (addr) {
-      while (ch = get_byte(addr++)) {
+      while ((ch = get_byte(addr++)) != 0) {
          if (i == size) {
             str = (byte*)realloc(str, size + 16);
             size += 16;
@@ -797,7 +887,7 @@ char *getStringW(dword addr) {
    short ch;
    str = (byte*) malloc(size);
    if (addr) {
-      while (ch = get_word(addr)) {
+      while ((ch = get_word(addr)) != 0) {
          if (i == size) {
             str = (byte*)realloc(str, size + 16);
             size += 16;
@@ -842,27 +932,27 @@ void unemulated(dword addr) {
    get right at their parameters on top of the stack.
 */
 
-void emu_GetCommandLineA(dword addr) {
+void emu_GetCommandLineA(dword /*addr*/) {
    eax = pCmdLineA;
 }
 
-void emu_GetCommandLineW(dword addr) {
+void emu_GetCommandLineW(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    dword pp = readDword(peb + PEB_PROCESS_PARMS);
    eax = readDword(pp + PARMS_CMD_LINE + 4);
 }
 
-void emu_FreeEnvironmentStringsA(dword addr) {
+void emu_FreeEnvironmentStringsA(dword /*addr*/) {
    dword env = pop(SIZE_DWORD);
    eax = HeapBase::getHeap()->free(env) ? 1 : 0;
 }
 
-void emu_FreeEnvironmentStringsW(dword addr) {
+void emu_FreeEnvironmentStringsW(dword /*addr*/) {
    pop(SIZE_DWORD);
    eax = 1;
 }
 
-void emu_GetEnvironmentStringsA(dword addr) {
+void emu_GetEnvironmentStringsA(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    dword pp = readDword(peb + PEB_PROCESS_PARMS);
    dword wenv = readDword(pp + PARMS_ENV_PTR);
@@ -882,7 +972,7 @@ void emu_GetEnvironmentStringsA(dword addr) {
    }
 }
 
-void emu_GetEnvironmentStringsW(dword addr) {
+void emu_GetEnvironmentStringsW(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    dword pp = readDword(peb + PEB_PROCESS_PARMS);
    eax = readDword(pp + PARMS_ENV_PTR);
@@ -894,7 +984,7 @@ void emu_FlsAlloc(dword addr) {
    emu_TlsAlloc(addr);
 }
 
-void emu_TlsAlloc(dword addr) {
+void emu_TlsAlloc(dword /*addr*/) {
    //return is dword index of newly allocated value which is initialized to zero
    //fail value is TLS_OUT_OF_INDEXES
    dword peb = readDword(fsBase + TEB_PEB_PTR);
@@ -950,7 +1040,7 @@ void emu_TlsAlloc(dword addr) {
    setThreadError(0xc0000017);
 }
 
-void emu_TlsFree(dword addr) {
+void emu_TlsFree(dword /*addr*/) {
    //return is BOOL 0 - fail, 1 - success
    dword dwTlsIndex = pop(SIZE_DWORD);
 
@@ -993,7 +1083,7 @@ void emu_TlsFree(dword addr) {
    }      
 }
 
-void emu_TlsGetValue(dword addr) {
+void emu_TlsGetValue(dword /*addr*/) {
    dword dwTlsIndex = pop(SIZE_DWORD);
    if (dwTlsIndex < 64) {
       eax = readDword(fsBase + TEB_TLS_ARRAY + dwTlsIndex * 4);
@@ -1017,7 +1107,7 @@ void emu_TlsGetValue(dword addr) {
    }
 }
 
-void emu_TlsSetValue(dword addr) {
+void emu_TlsSetValue(dword /*addr*/) {
    dword dwTlsIndex = pop(SIZE_DWORD);
    dword lpTlsValue = pop(SIZE_DWORD);
    //returns BOOL 0 - fail, 1 - success
@@ -1052,23 +1142,23 @@ void emu_TlsSetValue(dword addr) {
    }
 }
 
-void emu_GetLastError(dword addr) {
+void emu_GetLastError(dword /*addr*/) {
    eax = readDword(fsBase + TEB_LAST_ERROR);
 }
 
-void emu_SetLastError(dword addr) {
+void emu_SetLastError(dword /*addr*/) {
    dword err = pop(SIZE_DWORD);
    setThreadError(err);
 }
 
-void emu_AddVectoredExceptionHandler(dword addr) {
-   dword first = pop(SIZE_DWORD);
+void emu_AddVectoredExceptionHandler(dword /*addr*/) {
+   bool first = pop(SIZE_DWORD) != 0;
    dword handler = pop(SIZE_DWORD);
    addVectoredExceptionHandler(first, handler);
    eax = handler;
 }
 
-void emu_RemoveVectoredExceptionHandler(dword addr) {
+void emu_RemoveVectoredExceptionHandler(dword /*addr*/) {
    dword handler = pop(SIZE_DWORD);
    removeVectoredExceptionHandler(handler);
 }
@@ -1082,13 +1172,13 @@ static void initCriticalSection(dword lpcs, dword spinCount) {
    writeDword(lpcs + 20, spinCount);   //SpinCount
 }
 
-void emu_InitializeCriticalSection(dword addr) {
+void emu_InitializeCriticalSection(dword /*addr*/) {
    dword lpCriticalSection = pop(SIZE_DWORD);
    initCriticalSection(lpCriticalSection, 0);
    //add lpCriticalSection to list of active critical sections
 }
 
-void emu_InitializeCriticalSectionAndSpinCount(dword addr) {
+void emu_InitializeCriticalSectionAndSpinCount(dword /*addr*/) {
    dword lpCriticalSection = pop(SIZE_DWORD);
    dword spinCount = pop(SIZE_DWORD);
    initCriticalSection(lpCriticalSection, spinCount);
@@ -1099,7 +1189,7 @@ void emu_InitializeCriticalSectionAndSpinCount(dword addr) {
    eax = 1;
 }
 
-bool tryEnterCriticalSection(dword addr) {
+bool tryEnterCriticalSection(dword /*addr*/) {
    dword lpCriticalSection = pop(SIZE_DWORD);
    //now verify that this is an active critical section
    dword tid = readDword(lpCriticalSection + 12);
@@ -1128,7 +1218,7 @@ void emu_TryEnterCriticalSection(dword addr) {
    eax = tryEnterCriticalSection(addr);
 }
 
-void emu_LeaveCriticalSection(dword addr) {
+void emu_LeaveCriticalSection(dword /*addr*/) {
    dword lpCriticalSection = pop(SIZE_DWORD); 
    dword tid = readDword(lpCriticalSection + 12);
    if (tid == activeThread->handle) {
@@ -1141,38 +1231,38 @@ void emu_LeaveCriticalSection(dword addr) {
    }
 }
 
-void emu_DeleteCriticalSection(dword addr) {
-   dword lpCriticalSection = pop(SIZE_DWORD); 
+void emu_DeleteCriticalSection(dword /*addr*/) {
+   /*dword lpCriticalSection =*/ pop(SIZE_DWORD); 
    //remove lpCriticalSection from list of active critical sections
 }
 
-void emu_Sleep(dword addr) {
-   dword milliSec = pop(SIZE_DWORD);
+void emu_Sleep(dword /*addr*/) {
+   /*dword milliSec =*/ pop(SIZE_DWORD);
 }
 
-void emu_InterlockedIncrement(dword addr) {
+void emu_InterlockedIncrement(dword /*addr*/) {
    dword addend = pop(SIZE_DWORD); 
    eax = readDword(addend) + 1;
    writeDword(addend, eax);
 }
 
-void emu_InterlockedDecrement(dword addr) {
+void emu_InterlockedDecrement(dword /*addr*/) {
    dword addend = pop(SIZE_DWORD); 
    eax = readDword(addend) - 1;
    writeDword(addend, eax);
 }
 
-void emu_EncodePointer(dword addr) {
+void emu_EncodePointer(dword /*addr*/) {
    dword ptr = pop(SIZE_DWORD);
    eax = ptr ^ randVal;
 }
 
-void emu_DecodePointer(dword addr) {
+void emu_DecodePointer(dword /*addr*/) {
    dword ptr = pop(SIZE_DWORD);
    eax = ptr ^ randVal;
 }
 
-void emu_lstrlen(unsigned int addr) {
+void emu_lstrlen(unsigned int /*addr*/) {
    dword str = pop(SIZE_DWORD);
    dword len = 0;
    while (isLoaded(str) && get_byte(str)) {
@@ -1193,7 +1283,7 @@ void strcpy_common_wide(dword dest, dword src) {
    }
 }
 
-void emu_lstrcpyW(unsigned int addr) {
+void emu_lstrcpyW(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
    dword src = pop(SIZE_DWORD);
    strcpy_common_wide(eax, src);
@@ -1208,13 +1298,13 @@ void strcpy_common(dword dest, dword src) {
    }
 }
 
-void emu_lstrcpy(unsigned int addr) {
+void emu_lstrcpy(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
    dword src = pop(SIZE_DWORD);
    strcpy_common(eax, src);
 }
 
-void emu_lstrcat(unsigned int addr) {
+void emu_lstrcat(unsigned int /*addr*/) {
    dword dest = pop(SIZE_DWORD);
    eax = dest;
    dword src = pop(SIZE_DWORD);
@@ -1223,7 +1313,7 @@ void emu_lstrcat(unsigned int addr) {
    strcpy_common(dest, src);
 }
 
-void emu_strcat(unsigned int addr) {
+void emu_strcat(unsigned int /*addr*/) {
    dword dest = readDword(esp);
    eax = readDword(esp);
    dword src = readDword(esp + 4);
@@ -1232,7 +1322,7 @@ void emu_strcat(unsigned int addr) {
    strcpy_common(dest, src);
 }
 
-void emu_strcpy(unsigned int addr) {
+void emu_strcpy(unsigned int /*addr*/) {
    eax = readDword(esp);
    strcpy_common(eax, readDword(esp + 4));
 }
@@ -1248,14 +1338,14 @@ void strncpy_common(dword dest, dword src, dword n) {
    }
 }
 
-void emu_strncpy(unsigned int addr) {
+void emu_strncpy(unsigned int /*addr*/) {
    eax = readDword(esp);
    dword src = readDword(esp + 4);
    dword n = readDword(esp + 8);
    strncpy_common(eax, src, n);
 }
 
-void emu_wcsset(unsigned int addr) {
+void emu_wcsset(unsigned int /*addr*/) {
    dword dest = readDword(esp);
    dword val = readDword(esp + 4);
    eax = dest;
@@ -1265,7 +1355,7 @@ void emu_wcsset(unsigned int addr) {
    }
 }
 
-void emu_strlwr(unsigned int addr) {
+void emu_strlwr(unsigned int /*addr*/) {
    dword dest = readDword(esp);
    eax = dest;
    while (isLoaded(dest)) {
@@ -1275,40 +1365,40 @@ void emu_strlwr(unsigned int addr) {
    }
 }
 
-void emu_RevertToSelf(unsigned int addr) {
+void emu_RevertToSelf(unsigned int /*addr*/) {
    eax = 1;
 }
 
-void emu_AreAnyAccessesGranted(unsigned int addr) {
+void emu_AreAnyAccessesGranted(unsigned int /*addr*/) {
    eax = 1;
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
 }
 
-void emu_GetBkMode(unsigned int addr) {
+void emu_GetBkMode(unsigned int /*addr*/) {
    eax = 0;
    pop(SIZE_DWORD);
 }
 
-void emu_GdiFlush(unsigned int addr) {
+void emu_GdiFlush(unsigned int /*addr*/) {
    eax = 1;
 }
 
-void emu_GetROP2(unsigned int addr) {
+void emu_GetROP2(unsigned int /*addr*/) {
    eax = 0;
    pop(SIZE_DWORD);
 }
 
-void emu_GetBkColor(unsigned int addr) {
+void emu_GetBkColor(unsigned int /*addr*/) {
    eax = 0;
    pop(SIZE_DWORD);
 }
 
-void emu_GdiGetBatchLimit(unsigned int addr) {
+void emu_GdiGetBatchLimit(unsigned int /*addr*/) {
    eax = 20;
 }
 
-void emu_StrCmpW(unsigned int addr) {
+void emu_StrCmpW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword str2 = pop(SIZE_DWORD);
    eax = 1;
@@ -1329,13 +1419,13 @@ void emu_StrCmpW(unsigned int addr) {
    }
 }
 
-void emu_StrSpnA(unsigned int addr) {
-   dword str1 = pop(SIZE_DWORD);
-   dword str2 = pop(SIZE_DWORD);
+void emu_StrSpnA(unsigned int /*addr*/) {
+   /*dword str1 =*/ pop(SIZE_DWORD);
+   /*dword str2 =*/ pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_StrCmpIW(unsigned int addr) {
+void emu_StrCmpIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword str2 = pop(SIZE_DWORD);
    eax = 1;
@@ -1356,7 +1446,7 @@ void emu_StrCmpIW(unsigned int addr) {
    }
 }
 
-void emu_StrCpyW(unsigned int addr) {
+void emu_StrCpyW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword str2 = pop(SIZE_DWORD);
    eax = str1;
@@ -1371,7 +1461,7 @@ void emu_StrCpyW(unsigned int addr) {
    }
 }
 
-void emu_StrChrIA(unsigned int addr) {
+void emu_StrChrIA(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    int match = tolower(pop(SIZE_DWORD));
    dword val = get_byte(str1);
@@ -1385,13 +1475,13 @@ void emu_StrChrIA(unsigned int addr) {
    }
 }
 
-void emu_StrCSpnIA(unsigned int addr) {
-   dword str1 = pop(SIZE_DWORD);
-   dword str2 = pop(SIZE_DWORD);
+void emu_StrCSpnIA(unsigned int /*addr*/) {
+   /*dword str1 =*/ pop(SIZE_DWORD);
+   /*dword str2 =*/ pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_StrChrIW(unsigned int addr) {
+void emu_StrChrIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword match = towlower(pop(SIZE_DWORD));
    dword val = get_word(str1);
@@ -1406,7 +1496,7 @@ void emu_StrChrIW(unsigned int addr) {
    }
 }
 
-void emu_StrCmpNW(unsigned int addr) {
+void emu_StrCmpNW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword str2 = pop(SIZE_DWORD);
    int n = pop(SIZE_DWORD);
@@ -1427,7 +1517,7 @@ void emu_StrCmpNW(unsigned int addr) {
    }
 }
 
-void emu_StrCmpNIW(unsigned int addr) {
+void emu_StrCmpNIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword str2 = pop(SIZE_DWORD);
    int n = pop(SIZE_DWORD);
@@ -1448,133 +1538,133 @@ void emu_StrCmpNIW(unsigned int addr) {
    }
 }
 
-void emu_StrCSpnIW(unsigned int addr) {
-   dword str1 = pop(SIZE_DWORD);
-   dword str2 = pop(SIZE_DWORD);
+void emu_StrCSpnIW(unsigned int /*addr*/) {
+   /*dword str1 =*/ pop(SIZE_DWORD);
+   /*dword str2 =*/ pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetClientRect(unsigned int addr) {
+void emu_GetClientRect(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetACP(unsigned int addr) {
+void emu_GetACP(unsigned int /*addr*/) {
    eax = 1252;
 }
 
-void emu_IsCharUpperA(unsigned int addr) {
+void emu_IsCharUpperA(unsigned int /*addr*/) {
    eax = isupper(pop(SIZE_DWORD));
 }
 
-void emu_IsCharAlphaA(unsigned int addr) {
+void emu_IsCharAlphaA(unsigned int /*addr*/) {
    eax = isalpha(pop(SIZE_DWORD));
 }
 
-void emu_GetIconInfo(unsigned int addr) {
+void emu_GetIconInfo(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetWindow(unsigned int addr) {
+void emu_GetWindow(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_IsChild(unsigned int addr) {
+void emu_IsChild(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetTopWindow(unsigned int addr) {
+void emu_GetTopWindow(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetWindowContextHelpId(unsigned int addr) {
+void emu_GetWindowContextHelpId(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_WindowFromDC(unsigned int addr) {
+void emu_WindowFromDC(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetWindowPlacement(unsigned int addr) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
-   eax = 0;
-}
-
-void emu_CopyIcon(unsigned int addr) {
-   pop(SIZE_DWORD);
-   eax = 0;
-}
-
-void emu_IsIconic(unsigned int addr) {
-   pop(SIZE_DWORD);
-   eax = 0;
-}
-
-void emu_GetGUIThreadInfo(unsigned int addr) {
+void emu_GetWindowPlacement(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetDC(unsigned int addr) {
+void emu_CopyIcon(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetTitleBarInfo(unsigned int addr) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
-   eax = 0;
-}
-
-void emu_IsWindowUnicode(unsigned int addr) {
+void emu_IsIconic(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_IsMenu(unsigned int addr) {
-   pop(SIZE_DWORD);
-   eax = 0;
-}
-
-void emu_GetWindowRect(unsigned int addr) {
+void emu_GetGUIThreadInfo(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_IsWindowVisible(unsigned int addr) {
+void emu_GetDC(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_GetForegroundWindow(unsigned int addr) {
+void emu_GetTitleBarInfo(unsigned int /*addr*/) {
+   pop(SIZE_DWORD);
+   pop(SIZE_DWORD);
+   eax = 0;
+}
+
+void emu_IsWindowUnicode(unsigned int /*addr*/) {
+   pop(SIZE_DWORD);
+   eax = 0;
+}
+
+void emu_IsMenu(unsigned int /*addr*/) {
+   pop(SIZE_DWORD);
+   eax = 0;
+}
+
+void emu_GetWindowRect(unsigned int /*addr*/) {
+   pop(SIZE_DWORD);
+   pop(SIZE_DWORD);
+   eax = 0;
+}
+
+void emu_IsWindowVisible(unsigned int /*addr*/) {
+   pop(SIZE_DWORD);
+   eax = 0;
+}
+
+void emu_GetForegroundWindow(unsigned int /*addr*/) {
    eax = 0x12345678;
 }
 
-void emu_InSendMessage(unsigned int addr) {
+void emu_InSendMessage(unsigned int /*addr*/) {
    eax = 0;
 }
 
-void emu_GetWindowTextA(unsigned int addr) {
+void emu_GetWindowTextA(unsigned int /*addr*/) {
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    pop(SIZE_DWORD);
    eax = 0;
 }
 
-void emu_IsUserAnAdmin(unsigned int addr) {
+void emu_IsUserAnAdmin(unsigned int /*addr*/) {
    eax = 0;
 }
 
@@ -1584,7 +1674,7 @@ void emu_IsUserAnAdmin(unsigned int addr) {
 #define VER_PLATFORM_WIN32_NT 2
 #endif
 
-void emu_GetVersionExA(unsigned int addr) {
+void emu_GetVersionExA(unsigned int /*addr*/) {
    dword ptr = pop(SIZE_DWORD);
    dword sz = get_long(ptr);
    eax = 1;
@@ -1602,17 +1692,17 @@ void emu_GetVersionExA(unsigned int addr) {
    }
 }
 
-void emu_GetVersion(unsigned int addr) {
+void emu_GetVersion(unsigned int /*addr*/) {
    eax = 0xa280105;
 }
 
-void emu_GetTickCount(unsigned int addr) {
-   eax = (dword)(tsc / 1000000);
+void emu_GetTickCount(unsigned int /*addr*/) {
+   eax = (dword)(tsc.ll / 1000000);
 }
 
-void emu_GetSystemTimeAsFileTime(dword addr) {
+void emu_GetSystemTimeAsFileTime(dword /*addr*/) {
    dword lpSystemTimeAsFileTime = pop(SIZE_DWORD);
-   quad time = tsc / 100;  //tsc is roughly nanosec counter
+   quad time = tsc.ll / 100;  //tsc is roughly nanosec counter
    dword tbuf[2];
    quad *t = (quad*)tbuf;
    getSystemBaseTime(tbuf, tbuf + 1);
@@ -1621,20 +1711,19 @@ void emu_GetSystemTimeAsFileTime(dword addr) {
    writeDword(lpSystemTimeAsFileTime + 4, tbuf[1]);
 }
 
-void emu_QueryPerformanceCounter(dword addr) {
+void emu_QueryPerformanceCounter(dword /*addr*/) {
    dword lpPerformanceCount = pop(SIZE_DWORD);
-   dword *tbuf = (dword*)&tsc;
-   writeDword(lpPerformanceCount, tbuf[0]);
-   writeDword(lpPerformanceCount + 4, tbuf[1]);
+   writeDword(lpPerformanceCount, tsc.low);
+   writeDword(lpPerformanceCount + 4, tsc.high);
 }
 
-void emu_IsDebuggerPresent(dword addr) {
+void emu_IsDebuggerPresent(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    eax = get_byte(peb + 2);
    msg("x86emu: IsDebuggerPresent called\n");
 }
 
-void emu_CheckRemoteDebuggerPresent(dword addr) {
+void emu_CheckRemoteDebuggerPresent(dword /*addr*/) {
    eax = 1;
    /*dword hProcess = */pop(SIZE_DWORD);
    dword pbDebuggerPresent = pop(SIZE_DWORD);
@@ -1642,7 +1731,7 @@ void emu_CheckRemoteDebuggerPresent(dword addr) {
    msg("x86emu: CheckRemoteDebuggerPresent called\n");
 }
 
-void emu_CloseHandle(dword addr) {
+void emu_CloseHandle(dword /*addr*/) {
    dword hObject = pop(SIZE_DWORD);
    msg("x86emu: CloseHandle(0x%x) called\n", hObject);
 /*
@@ -1694,7 +1783,7 @@ typedef struct _SYSTEM_MODULE_INFORMATION {
    SYSTEM_MODULE Modules[0];
 } SYSTEM_MODULE_INFORMATION, *PSYSTEM_MODULE_INFORMATION;
 
-void emu_NtQuerySystemInformation(dword addr) {
+void emu_NtQuerySystemInformation(dword /*addr*/) {
    eax = 0; //success
    dword SystemInformationClass = pop(SIZE_DWORD);
    dword pSystemInformation = pop(SIZE_DWORD);
@@ -1786,7 +1875,7 @@ typedef enum _THREADINFOCLASS {
    ThreadHideFromDebugger
 } THREADINFOCLASS, *PTHREADINFOCLASS;
 
-void emu_NtSetInformationThread(dword addr) {
+void emu_NtSetInformationThread(dword /*addr*/) {
    eax = 0; //success
    dword ThreadHandle = pop(SIZE_DWORD);
    dword ThreadInformationClass = pop(SIZE_DWORD);
@@ -1809,7 +1898,7 @@ typedef enum _PROCESSINFOCLASS {
 
 //#define STATUS_INFO_LENGTH_MISMATCH 0xC0000004
 
-void emu_NtQueryInformationProcess(dword addr) {
+void emu_NtQueryInformationProcess(dword /*addr*/) {
    eax = 0; //success
    dword ProcessHandle = pop(SIZE_DWORD);
    dword ProcessInformationClass = pop(SIZE_DWORD);
@@ -1856,19 +1945,19 @@ void emu_NtQueryInformationProcess(dword addr) {
    }
 }
 
-void emu_GetCurrentProcess(dword addr) {
+void emu_GetCurrentProcess(dword /*addr*/) {
    eax = 0xffffffff;
 }
 
-void emu_GetCurrentProcessId(dword addr) {
+void emu_GetCurrentProcessId(dword /*addr*/) {
    eax = get_long(fsBase + TEB_PROCESS_ID);
 }
 
-void emu_GetCurrentThreadId(dword addr) {
+void emu_GetCurrentThreadId(dword /*addr*/) {
    eax = get_long(fsBase + TEB_THREAD_ID);
 }
 
-void emu_GetThreadContext(dword addr) {
+void emu_GetThreadContext(dword /*addr*/) {
    dword hThread = pop(SIZE_DWORD);
    dword lpContext = pop(SIZE_DWORD);
    WIN_CONTEXT ctx;
@@ -1886,7 +1975,7 @@ void emu_GetThreadContext(dword addr) {
 }
 
 //need to allocate new TEB here and link to PEB
-void emu_CreateThread(dword addr) {
+void emu_CreateThread(dword /*addr*/) {
    /*LPSECURITY_ATTRIBUTES lpThreadAttributes = */ pop(SIZE_DWORD);
    /*SIZE_T dwStackSize = */ pop(SIZE_DWORD);
    dword lpStartAddress = pop(SIZE_DWORD);
@@ -1946,7 +2035,7 @@ dword addHeapCommon(unsigned int maxSize, unsigned int base) {
    return HeapBase::addHeap(maxSize, base);
 }
 
-void emu_HeapCreate(dword addr) {
+void emu_HeapCreate(dword /*addr*/) {
    //need to test PEB_NUM_HEAPS against PEB_MAX_HEAPS ??
    
    /* DWORD flOptions =*/ pop(SIZE_DWORD); 
@@ -1958,16 +2047,16 @@ void emu_HeapCreate(dword addr) {
    //save eax into PEB and update PEB_NUM_HEAPS ??
 }
 
-void emu_HeapDestroy(dword addr) {
+void emu_HeapDestroy(dword /*addr*/) {
    dword hHeap = pop(SIZE_DWORD); 
    eax = HeapBase::getHeap()->destroyHeap(hHeap);
 }
 
-void emu_GetProcessHeap(dword addr) {
+void emu_GetProcessHeap(dword /*addr*/) {
    eax = HeapBase::getHeap()->getPrimaryHeap();
 }
 
-void emu_HeapAlloc(dword addr) {
+void emu_HeapAlloc(dword /*addr*/) {
    dword hHeap = pop(SIZE_DWORD); 
    /* DWORD dwFlags =*/ pop(SIZE_DWORD);
    dword dwBytes = pop(SIZE_DWORD);
@@ -1976,7 +2065,7 @@ void emu_HeapAlloc(dword addr) {
    eax = h ? h->calloc(dwBytes, 1) : 0;
 }
 
-void emu_HeapFree(dword addr) {
+void emu_HeapFree(dword /*addr*/) {
    dword hHeap = pop(SIZE_DWORD); 
    /* DWORD dwFlags =*/ pop(SIZE_DWORD);
    dword lpMem = pop(SIZE_DWORD);
@@ -1984,28 +2073,28 @@ void emu_HeapFree(dword addr) {
    eax = h ? h->free(lpMem) : 0;
 }
 
-void emu_GlobalAlloc(dword addr) {
+void emu_GlobalAlloc(dword /*addr*/) {
    /*dword uFlags =*/ pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->calloc(dwSize, 1);
 }
 
-void emu_GlobalFree(dword addr) {
+void emu_GlobalFree(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->free(pop(SIZE_DWORD));
 }
 
-void emu_GlobalLock(dword addr) {
+void emu_GlobalLock(dword /*addr*/) {
    eax = pop(SIZE_DWORD);
 }
 
-void emu_NtAllocateVirtualMemory(dword addr) {
-   dword procHandle = pop(SIZE_DWORD); 
+void emu_NtAllocateVirtualMemory(dword /*addr*/) {
+   /*dword procHandle =*/ pop(SIZE_DWORD); 
    dword pBaseAddress = pop(SIZE_DWORD); 
-   dword zeroBits = pop(SIZE_DWORD); 
+   /*dword zeroBits =*/ pop(SIZE_DWORD); 
    dword pRegionSize = pop(SIZE_DWORD);
-   dword flAllocationType = pop(SIZE_DWORD);
+   /*dword flAllocationType =*/ pop(SIZE_DWORD);
    /*dword flProtect =*/ pop(SIZE_DWORD);
    dword rbase = get_long(pBaseAddress);
    dword dwSize = get_long(pRegionSize);
@@ -2024,10 +2113,10 @@ void emu_NtAllocateVirtualMemory(dword addr) {
 //   msg("x86emu: NtVirtualAllocateMemory called: %d bytes allocated at 0x%x\n", dwSize, addr);
 }
 
-void emu_VirtualAlloc(dword addr) {
+void emu_VirtualAlloc(dword /*addr*/) {
    dword lpAddress = pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
-   dword flAllocationType = pop(SIZE_DWORD);
+   /*dword flAllocationType =*/ pop(SIZE_DWORD);
    /*dword flProtect =*/ pop(SIZE_DWORD);
    dword base = lpAddress & 0xFFFFF000;
    if (lpAddress) {
@@ -2049,7 +2138,7 @@ void emu_VirtualFree(dword addr) {
    msg("x86emu: VirtualFree(0x%08x, %d) called: 0x%x\n", addr, dwSize, eax);
 }
 
-void emu_VirtualProtect(dword addr) {
+void emu_VirtualProtect(dword /*addr*/) {
    dword lpAddress = pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
    dword flNewProtect = pop(SIZE_DWORD);
@@ -2059,14 +2148,14 @@ void emu_VirtualProtect(dword addr) {
    eax = 1;
 }
 
-void emu_LocalAlloc(dword addr) {
+void emu_LocalAlloc(dword /*addr*/) {
    /*dword uFlags =*/ pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(dwSize);
 }
 
-void emu_LocalFree(dword addr) {
+void emu_LocalFree(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->free(pop(SIZE_DWORD));
 }
@@ -2094,7 +2183,7 @@ dword myGetProcAddress(dword hModule, dword lpProcName) {
       char *dot;
       int len = strlen(m->moduleName) + 16;
       procName = (char*) malloc(len);
-      qsnprintf(procName, len, "%s_0x%4.4X", m->moduleName, m->handle);
+      ::qsnprintf(procName, len, "%s_0x%4.4X", m->moduleName, m->handle);
       dot = strchr(procName, '.');
       if (dot) *dot = '_';
       if ((m->handle & FAKE_HANDLE_BASE) == 0) {
@@ -2166,7 +2255,7 @@ dword myGetProcAddress(dword hModule, const char *procName) {
 }
 
 //FARPROC __stdcall GetProcAddress(HMODULE hModule,LPCSTR lpProcName)
-void emu_GetProcAddress(dword addr) {
+void emu_GetProcAddress(dword /*addr*/) {
    static dword address = 0x80000000;
    static dword bad = 0xFFFFFFFF;
    dword hModule = pop(SIZE_DWORD); 
@@ -2223,7 +2312,7 @@ void makeImportLabel(dword addr, dword val) {
    free(name);
 }
 
-HandleList *moduleCommonA(dword addr) {
+HandleList *moduleCommonA(dword /*addr*/) {
    dword lpModName = pop(SIZE_DWORD);
    char *modName = getString(lpModName);
    modName = checkModuleExtension(modName);
@@ -2240,7 +2329,7 @@ HandleList *moduleCommonA(dword addr) {
    return m;
 }
 
-HandleList *moduleCommonW(dword addr) {
+HandleList *moduleCommonW(dword /*addr*/) {
    dword lpModName = pop(SIZE_DWORD);
    char *modName = getStringW(lpModName);
    modName = checkModuleExtension(modName);
@@ -2303,10 +2392,10 @@ void emu_GetModuleHandleW(dword addr) {
    }
 }
 
-void emu_LdrLoadDll(dword addr) {
+void emu_LdrLoadDll(dword /*addr*/) {
    msg("x86emu: LdrLoadDll");
-   dword PathToFile = pop(SIZE_DWORD); 
-   dword Flags  = pop(SIZE_DWORD); 
+   /*dword PathToFile =*/ pop(SIZE_DWORD); 
+   /*dword Flags  =*/ pop(SIZE_DWORD); 
    dword pModuleFileName = pop(SIZE_DWORD);   //PUNICODE_STRING
    dword pModuleHandle = pop(SIZE_DWORD);
 
@@ -2324,7 +2413,7 @@ void emu_LdrLoadDll(dword addr) {
    free(modName);
 }
 
-void emu_LdrGetProcedureAddress(dword addr) {
+void emu_LdrGetProcedureAddress(dword /*addr*/) {
    static dword address = 0x80000000;
    static dword bad = 0xFFFFFFFF;
 
@@ -2386,22 +2475,22 @@ void emu_LoadLibraryW(dword addr) {
    eax = m->handle;
 }
 
-void emu_malloc(dword addr) {
+void emu_malloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(readDword(esp));
 }
 
-void emu_calloc(dword addr) {
+void emu_calloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->calloc(readDword(esp), readDword(esp + 4));
 }
 
-void emu_realloc(dword addr) {
+void emu_realloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->realloc(readDword(esp), readDword(esp + 4));
 }
 
-void emu_free(dword addr) {
+void emu_free(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    p->free(readDword(esp));
 }
@@ -2440,21 +2529,10 @@ void doImports(PETables &pe) {
 HandleList *moduleFromAddress(dword addr) {
    HandleList *hl, *result = NULL;
    for (hl = moduleHead; hl; hl = hl->next) {
-//#ifdef CYGWIN
       if (addr < hl->maxAddr && addr >= hl->handle) {
          result = hl;
          break;
       }
-/*
-#else
-      //Because MS does not include psapi stuff in Visual Studio
-      dword min = 0;
-      if (addr > min && addr < hl->maxAddr && addr >= hl->handle) {
-         result = hl;
-         min = hl->handle;
-      }
-#endif
-*/
    }
    return result;
 }
@@ -2509,7 +2587,7 @@ FunctionInfo *newFunctionInfo(const char *name) {
    FunctionInfo *f = (FunctionInfo*)calloc(1, sizeof(FunctionInfo));
    int len = strlen(name) + 1;
    f->fname = (char*)malloc(len);
-   qstrncpy(f->fname, name, len);
+   ::qstrncpy(f->fname, name, len);
    f->next = functionInfoList;
    functionInfoList = f;
    return f;
@@ -2532,11 +2610,11 @@ void getIdaTypeInfo(FunctionInfo *f) {
    if (get_named_type(ti, f->fname, NTF_SYMU, &type, &fields) > 0) {
       f->type = type;
       f->fields = fields;
-#if IDA_SDK_VERSION >= 540
-      uint32 arglocs[20];
+#if IDA_SDK_VERSION >= 520  
+      func_type_info_t info;
+      f->stackItems = calc_func_nargs(ti, type);
 #else
       ulong arglocs[20];
-#endif
       type_t *types[20];
       char *names[20];
       f->stackItems = build_funcarg_arrays(type,
@@ -2547,13 +2625,19 @@ void getIdaTypeInfo(FunctionInfo *f) {
                             20,           // size of these arrays
                             true);// remove constness from 
 /*                            
-         for (int i = 0; i < nargs; i++) {
-            print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
-            msg("%d: %s %s\n", i, buf, names[i] ? names[i] : "");
-         }
+      for (int i = 0; i < f->stackItems; i++) {
+         char buf[256];
+         print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
+         msg("%d: %s %s\n", i, buf, names[i] ? names[i] : "");
+      }
 */
-      if (f->stackItems) {
+      if (f->stackItems >= 1) {
          free_funcarg_arrays(types, names, f->stackItems);   
+      }
+#endif
+      if (f->stackItems == 0xffffffffu) {
+         //just in case there was an error
+         f->stackItems = 0;
       }
 /*
          type_t rettype[512];
@@ -2577,21 +2661,26 @@ void getIdaTypeInfo(FunctionInfo *f) {
 char *getFunctionPrototype(FunctionInfo *f) {
    char *result = NULL;
    if (f && f->type) {
-#if IDA_SDK_VERSION >= 540
-      uint32 arglocs[20];
+      char buf[512];
+      buf[0] = 0;
+#if IDA_SDK_VERSION >= 520
+      func_type_info_t info;
+      int ret = build_funcarg_info(ti, f->type, f->fields,
+                         &info, BFI_NOCONST);
+      if (ret >= 0) {
+         print_type_to_one_line(buf, sizeof(buf), ti, info.rettype.c_str());
+      }
 #else
       ulong arglocs[20];
-#endif
       type_t *types[20];
       char *names[20];
-      char buf[512];
-
       type_t rettype[512];   
       type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
       if (ret) {
          print_type_to_one_line(buf, sizeof(buf), ti, rettype);
-         result = _strdup(buf);
       }
+#endif
+      result = _strdup(buf);
       int len = strlen(result) + 3 + strlen(f->fname);
       result = (char*)realloc(result, len);
       qstrncat(result, " ", len);
@@ -2599,12 +2688,18 @@ char *getFunctionPrototype(FunctionInfo *f) {
       qstrncat(result, "(", len);
 
       if (f->stackItems) {
+#if IDA_SDK_VERSION < 520  
          build_funcarg_arrays(f->type, f->fields, arglocs,
                               types, names, 20, true);
+#endif
       }
       for (unsigned int i = 0; i < f->stackItems; i++) {
          //change to incorporate what we know from Ida
+#if IDA_SDK_VERSION >= 520  
+         print_type_to_one_line(buf, sizeof(buf), NULL, info[i].type.c_str());
+#else
          print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
+#endif
          len = strlen(result) + 3 + strlen(buf);
          result = (char*)realloc(result, len);
          if (i) {
@@ -2615,10 +2710,11 @@ char *getFunctionPrototype(FunctionInfo *f) {
       len = strlen(result) + 2;
       result = (char*)realloc(result, len);
       qstrncat(result, ")", len);
-
+#if IDA_SDK_VERSION < 520
       if (f->stackItems) {
          free_funcarg_arrays(types, names, f->stackItems);   
       }
+#endif
    }
    return result;
 }
@@ -2626,12 +2722,22 @@ char *getFunctionPrototype(FunctionInfo *f) {
 char *getFunctionReturnType(FunctionInfo *f) {
    if (f && f->type) {
       char buf[512];
+#if IDA_SDK_VERSION >= 520
+      func_type_info_t info;
+      int ret = build_funcarg_info(ti, f->type, f->fields,
+                         &info, BFI_NOCONST);
+      if (ret >= 0) {
+         print_type_to_one_line(buf, sizeof(buf), ti, info.rettype.c_str());
+         return _strdup(buf);
+      }
+#else
       type_t rettype[512];   
       type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
       if (ret) {
          print_type_to_one_line(buf, sizeof(buf), ti, rettype);
          return _strdup(buf);
       }
+#endif
    }
    return NULL;
 }
@@ -2713,19 +2819,19 @@ void init_til(const char *tilFile) {
    ti = load_til(tilpath, tilFile, err, sizeof(err));
 }
 
-void emu_exit(dword retval) {
+void emu_exit(dword /*retval*/) {
 }
 
-void emu_read(dword fd, dword buf, dword len) {
+void emu_read(dword /*fd*/, dword /*buf*/, dword /*len*/) {
 }
 
-void emu_write(dword fd, dword buf, dword len) {
+void emu_write(dword /*fd*/, dword /*buf*/, dword /*len*/) {
 }
 
-void emu_open(dword fname, dword flags, dword mode) {
+void emu_open(dword /*fname*/, dword /*flags*/, dword /*mode*/) {
 }
 
-void emu_close(dword fd) {
+void emu_close(dword /*fd*/) {
 }
 
 void syscall() {

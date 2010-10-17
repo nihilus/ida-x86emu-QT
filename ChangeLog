@@ -1,3 +1,9 @@
+* 10/17/10
+  Released version 1.0.0 of the emulator.
+  The graphical interface for the emulator has been ported to Qt
+  and the emulator now runs in full graphics mode on the Windows,
+  Linux, and OS X versions of idaq.
+
 * 09/20/10
   Emulator initialization loads .rsrc section if not already loaded
   Changed format of saved emulator information.  CHANGES ARE NOT 

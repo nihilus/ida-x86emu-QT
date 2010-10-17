@@ -1,6 +1,6 @@
 /*
    Source for x86 emulator IdaPro plugin
-   Copyright (c) 2003-2008 Chris Eagle
+   Copyright (c) 2003-2010 Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -26,25 +26,31 @@
  *
  */
 
-#ifndef _MSC_VER
-#ifndef USE_DANGEROUS_FUNCTIONS
-#define USE_DANGEROUS_FUNCTIONS 1
-#endif
-#endif
-
-#ifndef _MSC_VER
-#ifndef USE_STANDARD_FILE_FUNCTIONS
-#define USE_STANDARD_FILE_FUNCTIONS 1
-#endif
-#endif
-
+#ifdef __NT__
 #include <windows.h>
 #include <winnt.h>
 #include <wincrypt.h>
+#else
+//#ifndef __NT__
+#include <stdio.h>
+#include <fcntl.h>
+#include <time.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include "image.h"
+#endif
 
 #ifdef PACKED
 #undef PACKED
 #endif
+
+#ifndef __QT__
+#include "x86emu_ui.h"
+#else
+#include "x86emu_ui_qt.h"
+#endif
+
+#include "x86defs.h"
 
 #include <ida.hpp>
 #include <idp.hpp>
@@ -58,8 +64,6 @@
 #include <typeinf.hpp>
 #include <struct.hpp>
 
-#include "resource.h"
-#include "cpu.h"
 #include "emufuncs.h"
 #include "emuheap.h"
 #include "hooklist.h"
@@ -71,10 +75,6 @@
 #include "memmgr.h"
 #include "buffer.h"
 
-#ifndef CYGWIN
-#define strcasecmp stricmp
-#endif
-
 void memoryAccessException();
 
 #if IDA_SDK_VERSION >= 530
@@ -82,14 +82,26 @@ TForm *mainForm;
 TCustomControl *stackCC;
 #endif
 
+#ifdef __NT__
 HCRYPTPROV hProv;
-HWND mainWindow;
-HFONT fixed;
-HWND x86Dlg;
-HCURSOR waitCursor;
-HMODULE hModule;
+#else
+int hProv = -1;
+#endif
 
 unsigned int randVal;
+
+#ifndef __NT__
+
+union FILETIME {
+   unsigned long long llt;
+   struct {
+      dword dwLowDateTime;
+      dword dwHighDateTime;
+   };
+};
+
+#endif
+
 FILETIME baseTime;
 
 // The magic number for verifying the database blob
@@ -111,7 +123,7 @@ static const char heap_node_name[] = "$ X86emu Heap";
 
 //The IDA database node identifier into which the plug-in will
 //store its state information when the database is saved.
-static netnode x86emu_node(x86emu_node_name);
+netnode x86emu_node(x86emu_node_name);
 static netnode funcinfo_node(funcinfo_node_name);
 static netnode petable_node(petable_node_name);
 static netnode module_node(module_node_name);
@@ -122,53 +134,11 @@ static netnode heap_node(heap_node_name);
 IMAGE_NT_HEADERS nt;
 dword peImageBase;
 
-//Values used by the mmap dialog box
-char mmap_base[80];
-char mmap_size[80];
-
-//Values used by the input dialog box
-char value[80]; //value entered by the user
-char title[80]; //dynamic title for the input dialog
-char prompt[80]; //dynamic prompt for the input dialog
-char initial[80]; //dynamic initial value for the input dialog
-
-//This is the original window procedure for the register edit controls
-//required in order to subclass the controls to handle double clicks
-LONG oldProc;     
-LONG oldSegProc;     
-
-//text names for each of the register edit controls
-const char *names[] = {"EAX", "EBX", "ECX", "EDX", "EBP", 
-                       "ESP", "ESI", "EDI", "EIP", "EFLAGS"};
-
-//window handles for each of the register edit controls
-HWND editBoxes[10];
-
-//should align to a 16 byte boundary.  It doesn't initially
-//but get fixed in the initialization call. Set to stackTop - 1
-//in response to WM_INITDIALOG
-dword listTop;
-
 //highest address used by this image
 dword imageTop;
 
 //set to true if saved emulator state is found
 bool cpuInit = false;
-
-//callback for events in the emulator window
-BOOL CALLBACK DlgProc(HWND, UINT, WPARAM, LPARAM);
-
-//callback for mmap dialog events
-BOOL CALLBACK MmapDlgProc(HWND, UINT, WPARAM, LPARAM);
-
-//callback for input dialog events
-BOOL CALLBACK InputDlgProc(HWND, UINT, WPARAM, LPARAM);
-
-//subclass procedure for the register edit controls
-LRESULT EditSubclassProc(HWND, UINT, WPARAM, LPARAM);
-
-//the memory line at address has changed, update it
-void updateMemory(dword address);
 
 //functions to create header segments and load header bytes
 //from original binary into Ida database.
@@ -197,15 +167,24 @@ dword OSBuildNumber = 2600;
 
 extern til_t *ti;
 
+bool isWindowCreated = false;
+
 void getRandomBytes(void *buf, unsigned int len) {
+#ifdef __NT__
    if (hProv == 0) {
       CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, 0);
    }
    CryptGenRandom(hProv, len, (BYTE*)buf);
+#else
+   if (hProv == -1) {
+      hProv = open("/dev/urandom", O_RDONLY);
+   }
+   read(hProv, buf, len);
+#endif
 }
 
 /*
- * return system as 64 bit quantity representing the number of 
+ * return system time as 64 bit quantity representing the number of 
  * 100-nanosecond intervals since January 1, 1601 (UTC).
  */
 void getSystemBaseTime(dword *timeLow, dword *timeHigh) {
@@ -213,12 +192,30 @@ void getSystemBaseTime(dword *timeLow, dword *timeHigh) {
    *timeHigh = baseTime.dwHighDateTime;
 }
 
+#ifndef __NT__
+void GetSystemTimeAsFileTime(FILETIME *ft) {
+#if _POSIX_TIMERS > 0
+   timespec ts;
+   clock_gettime(CLOCK_REALTIME, &ts);
+   ft->llt = ts.tv_sec;
+   ft->llt *= 10000000;
+   ft->llt += ts.tv_nsec / 100;
+#else
+   timeval tv;
+   gettimeofday(&tv, NULL);
+   ft->llt = tv.tv_sec;
+   ft->llt *= 10000000;
+   ft->llt += tv.tv_usec * 10;
+#endif
+}
+#endif
+
 /*
  * Add a trace entry to the trace log
  */
 void traceLog(char *entry) {
    if (traceFile != NULL) {
-      fprintf(traceFile, "%s", entry);
+      qfprintf(traceFile, "%s", entry);
    }
    else {
       //should never get here, but if we do just dump to message window
@@ -226,12 +223,42 @@ void traceLog(char *entry) {
    }
 }
 
+void setTracking(bool track) {
+   doTrack = track;
+}
+
+bool getTracking() {
+   return doTrack;
+}
+
+void setTracing(bool trace) {
+   doTrace = trace;
+}
+
+bool getTracing() {
+   return doTrace;
+}
+
 void closeTrace() {
    if (traceFile) {  //just in case a trace is already open
-      fclose(traceFile);
+      qfclose(traceFile);
       traceFile = NULL;
    }
 }   
+
+void openTraceFile() {
+   char buf[260];
+#ifndef __QT__
+   const char *filter = "All (*.*)\0*.*\0Trace files (*.trc)\0*.trc\0";
+#else
+   const char *filter = "All (*.*);;Trace files (*.trc)";
+#endif
+   char *fname = getSaveFileName("Open trace file", buf, sizeof(buf), filter);
+   if (fname) {
+      closeTrace();
+      traceFile = qfopen(fname, "w");
+   }
+}
 
 /*
  * Set the title of the emulator window according to
@@ -239,32 +266,59 @@ void closeTrace() {
  */
 void setTitle() {
    char title[80];
-   qsnprintf(title, sizeof(title), "x86 Emulator - thread 0x%x%s", activeThread->handle, 
+   ::qsnprintf(title, sizeof(title), "x86 Emulator - thread 0x%x%s", activeThread->handle, 
            (activeThread->handle == THREAD_HANDLE_BASE) ? " (main)" : "");
-   SendMessage(x86Dlg, WM_SETTEXT, 0, (LPARAM)title);
+   setEmulatorTitle(title);
 }
 
 //convert a control ID to a pointer to the corresponding register
-unsigned int *toReg(int controlID) {
+unsigned int *toReg(int reg) {
    //offsets from control ID to register set array index
    static int registerMap[8] = {0, 2, -1, -1, 1, -1, 0, 0};
 
-   controlID -= IDC_EAX;
-   if (controlID < 8) {
-      return &cpu.general[controlID + registerMap[controlID]];
+   if (reg < 8) {
+      return &cpu.general[reg + registerMap[reg]];
    }
-   return controlID == 8 ? &cpu.eip : &cpu.eflags;
+   return reg == 8 ? &cpu.eip : &cpu.eflags;
+}
+
+//convert a control ID to a pointer to the corresponding register
+unsigned int *getRegisterPointer(int reg) {
+   switch (reg) {
+      case EAX: case ECX: case EDX: case EBX:
+      case ESP: case EBP: case ESI: case EDI:
+         return &cpu.general[reg];
+      case EIP:
+         return &cpu.eip;
+      case EFLAGS:
+         return &cpu.eflags;
+      default:
+         return NULL;
+   }
+}
+
+//convert a control ID to a pointer to the corresponding register
+unsigned int getRegisterValue(int reg) {
+   unsigned int *rp = getRegisterPointer(reg);
+   if (rp) {
+      return *rp;
+   }
+   return 0;
+}
+
+void setRegisterValue(int reg, unsigned int val) {
+   unsigned int *rp = getRegisterPointer(reg);
+   if (rp) {
+      *rp = val;
+   }
 }
 
 //update all register displays from existing register values
 //useful after a breakpoint or "run to"
 //i.e. synchronize the display to the actual cpu/memory values
 void syncDisplay() {
-   char buf[16];
-   for (int i = IDC_EAX; i <= IDC_EFLAGS; i++) {
-      unsigned int *reg = toReg(i);
-      qsnprintf(buf, sizeof(buf), "0x%08X", *reg);
-      SetDlgItemText(x86Dlg, i, buf);
+   for (int i = MIN_REG; i <= MAX_REG; i++) {
+      updateRegisterDisplay(i);
    }
 
 #if IDA_SDK_VERSION < 510
@@ -316,20 +370,13 @@ void syncDisplay() {
    jumpto(cpu.eip);
 }
 
-//update the specified register display with the specified 
-//value.  useful to update register contents based on user
-//input
-void updateRegister(int controlID, dword val) {
-   char buf[16];
-   unsigned int *reg = toReg(controlID);
-   *reg = val;
-   qsnprintf(buf, sizeof(buf), "0x%08X", val);
-   SetDlgItemText(x86Dlg, controlID, buf);
-}
-
 //force conversion to code at the current eip location
 void forceCode() {
+#if IDA_SDK_VERSION >= 540
+   int len = create_insn(cpu.eip);
+#else
    int len = ua_ana0(cpu.eip);
+#endif
 #ifdef DOUNK_EXPAND
    do_unknown_range(cpu.eip, len, DOUNK_EXPAND | DOUNK_DELNAMES);
 #else
@@ -343,7 +390,11 @@ void forceCode() {
 void codeCheck(void) {
    ea_t loc = cpu.eip;
    int len1 = get_item_size(loc);
+#if IDA_SDK_VERSION >= 540
+   int len2 = create_insn(loc);
+#else
    int len2 = ua_ana0(loc);
+#endif
    if (len1 != len2) {
       forceCode(); //or ua_code(loc);
    }
@@ -358,58 +409,17 @@ void codeCheck(void) {
    }
 }
 
-//get an int value from edit box string
-//assumes value is a valid hex string
-dword getEditBoxInt(HWND dlg, int dlgItem) {
-   char value[80];
-   dword newVal = 0;
-   GetDlgItemText(dlg, dlgItem, value, 80);
-   if (strlen(value) != 0) {
-//      sscanf(value, "%X", &newVal);
-      newVal = strtoul(value, NULL, 0);
-   }
-   return newVal;
-}
-
-//display a single line input box with the given title, prompt
-//and initial data value.  If the user does not cancel, their
-//data is placed into the global variable "value"
-int inputBox(const char *boxTitle, const char *msg, const char *init) {
-   qstrncpy(title, boxTitle, 80);
-   title[79] = 0;
-   qstrncpy(prompt, msg, 80);
-   prompt[79] = 0;
-   qstrncpy(initial, init, 80);
-   initial[79] = 0;
-   int result = DialogBox(hModule, MAKEINTRESOURCE(IDD_INPUTDIALOG),
-                          x86Dlg, InputDlgProc);
-   return result == 2;
-}
-
-//respond to a double click on one of the register
-//edit controls, by asking the user for a new
-//value for that register
-void doubleClick(HWND edit) {
-   int idx = 0;
-   while (editBoxes[idx] != edit) idx++;
-   int ctl = IDC_EAX + idx;
-   unsigned int *reg = toReg(ctl);
-   char message[32] = "Enter new value for ";
-   char original[16];
-   qstrncat(message, names[idx], sizeof(message));
-   qsnprintf(original, sizeof(original), "0x%08X", *reg);
-   if (inputBox("Update register", message, original)) {
-      dword newVal = strtoul(value, NULL, 0);
-//      sscanf(value, "%X", &newVal);
-      updateRegister(ctl, newVal);
-   }
+//update the specified register display with the specified 
+//value.  useful to update register contents based on user
+//input
+void updateRegister(int r, dword val) {
+   setRegisterValue(r, val);
+   updateRegisterDisplay(r);
 }
 
 //set a register from idc.
 void setIdcRegister(dword idc_reg_num, dword newVal) {
-   dword controls[] = {IDC_EAX, IDC_ECX, IDC_EDX, IDC_EBX, IDC_ESP, 
-                       IDC_EBP, IDC_ESI, IDC_EDI, IDC_EIP, IDC_EFLAGS};
-   updateRegister(controls[idc_reg_num], newVal);
+   updateRegister(idc_reg_num, newVal);
 }
 
 dword parseNumber(char *numb) {
@@ -424,9 +434,10 @@ dword parseNumber(char *numb) {
 //stack in right to left order as a C function would
 void pushData() {
    int count = 0;
-   if (inputBox("Push Stack Data", "Enter space separated data", "")) {
+   char *data = inputBox("Push Stack Data", "Enter space separated data", "");
+   if (data) {
       char *ptr;
-      while (ptr = strrchr(value, ' ')) {
+      while ((ptr = strrchr(data, ' ')) != NULL) {
          *ptr++ = 0;
          if (strlen(ptr)) {
             dword val = parseNumber(ptr);
@@ -434,8 +445,8 @@ void pushData() {
             count++;
          }
       }
-      if (strlen(value)) {
-         dword val = parseNumber(value);
+      if (strlen(data)) {
+         dword val = parseNumber(data);
          push(val, SIZE_DWORD);
          count++;
       }
@@ -447,42 +458,32 @@ void pushData() {
 //to a user named file;
 void dumpRange(dword low, dword hi) {
    char buf[80];
-   qsnprintf(buf, sizeof(buf), "0x%08X-0x%08X", low, hi);
-   if (inputBox("Enter Range", "Enter the address range to dump (inclusive)", buf)) {
+   ::qsnprintf(buf, sizeof(buf), "0x%08X-0x%08X", low, hi);
+   char *range = inputBox("Enter Range", "Enter the address range to dump (inclusive)", buf);
+   if (range) {
       char *end;
-      dword start = strtoul(value, &end, 0);
+      dword start = strtoul(range, &end, 0);
       if (end) {
          dword finish = strtoul(++end, NULL, 0);
-         OPENFILENAME ofn;
          char szFile[260];       // buffer for file name
-         memset(&ofn, 0, sizeof(ofn));
-
-         // Initialize OPENFILENAME
-         ofn.lStructSize = sizeof(ofn);
-         ofn.hwndOwner = x86Dlg;
-         ofn.lpstrFile = szFile;
-         //
-         // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
-         // use the contents of szFile to initialize itself.
-         //
-         *szFile = '\0';
-         ofn.nMaxFile = sizeof(szFile);
-         ofn.lpstrFilter = "All (*.*)\0*.*\0Binary (*.bin)\0*.BIN\0Executable (*.exe)\0*.EXE\0Dynamic link library (*.dll)\0*.DLL\0";
-         ofn.nFilterIndex = 1;
-         ofn.lpstrFileTitle = NULL;
-         ofn.nMaxFileTitle = 0;
-         ofn.lpstrInitialDir = NULL;
-         ofn.Flags = OFN_SHOWHELP | OFN_OVERWRITEPROMPT;         
-         if (GetSaveFileName(&ofn)) {
+#ifndef __QT__
+         const char *filter = "All (*.*)\0*.*\0Binary (*.bin)\0*.BIN\0Executable (*.exe)\0*.EXE\0Dynamic link library (*.dll)\0*.DLL\0";
+#else
+         const char *filter = "All (*.*);;Binary (*.bin);;Executable (*.exe);;Dynamic link library (*.dll)";
+#endif
+         char *fname = getSaveFileName("Dump bytes to file", szFile, sizeof(szFile), filter);
+         if (fname) {
             FILE *f = qfopen(szFile, "wb");
-            base2file(f, 0, start, finish);
+            if (f) {
+               base2file(f, 0, start, finish);
 /*
-            for (; start <= finish; start++) {
-               unsigned char val = readByte(start);
-               fwrite(&val, 1, 1, f);
-            }
+               for (; start <= finish; start++) {
+                  unsigned char val = readByte(start);
+                  qfwrite(&val, 1, 1, f);
+               }
 */
-            qfclose(f);
+               qfclose(f);
+            }
          }
       }
    }
@@ -500,20 +501,18 @@ void dumpEmbededPE() {
    char buf[80];
    dword base = get_screen_ea();
    if (get_word(base) != 0x5A4D) {   //check for MS-DOS magic
-      MessageBox(x86Dlg, "Failed to locate MS-DOS magic value, canceling dump.", 
-                 "Error", MB_OK | MB_ICONWARNING);
+      showErrorMessage("Failed to locate MS-DOS magic value, canceling dump.");
       return;
    }
    dword pebase = base + get_long(base + 0x3C);
    if (get_word(pebase) != 0x4550) {   //check for PE magic
-      MessageBox(x86Dlg, "Failed to locate PE magic value, canceling dump", 
-                 "Error", MB_OK | MB_ICONWARNING);
+      showErrorMessage("Failed to locate PE magic value, canceling dump");
       return;
    }
    short numSections = get_word(pebase + 6);
    if (numSections < 1 || numSections > 20) {  //arbitrary range
-      qsnprintf(buf, sizeof(buf), "Suspicious number of sections (%d), canceling dump", numSections);
-      MessageBox(x86Dlg, buf, "Error", MB_OK | MB_ICONWARNING);
+      ::qsnprintf(buf, sizeof(buf), "Suspicious number of sections (%d), canceling dump", numSections);
+      showErrorMessage(buf);
       return;
    }
    dword sectionBase = pebase + sizeof(IMAGE_NT_HEADERS);
@@ -522,9 +521,6 @@ void dumpEmbededPE() {
    dword sectionSize = get_long(lastSection + 16);
    dumpRange(base, base + sectionOffset + sectionSize);
 }
-
-static const char *unemulatedName;
-static dword unemulatedAddr;
 
 bool isStringPointer(char *type_str) {
    bool result = false;
@@ -551,137 +547,70 @@ bool isStringPointer(char *type_str) {
    return result;
 }
 
-BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message, 
-                                WPARAM wParam, LPARAM lParam) { 
+void generateArgList(const char *func, argcallback_t cb, void *user) {
    char buf[256];
-   FunctionInfo *f;
-   switch (message) { 
-      case WM_INITDIALOG: {
-         if (unemulatedName) {
-            qsnprintf(buf, sizeof(buf), "Call to: %s", unemulatedName);
-         }
-         else {
-            qsnprintf(buf, sizeof(buf), "Call to: Location 0x%08.8x", unemulatedAddr);
-         }
-         
-         SendMessage(hwndDlg, WM_SETTEXT, (WPARAM)0, (LPARAM)buf);
-
-         SendDlgItemMessage(hwndDlg, IDC_PARM_LIST, WM_SETFONT, (WPARAM)fixed, FALSE);
-         SendDlgItemMessage(hwndDlg, IDC_RETURN_VALUE, WM_SETFONT, (WPARAM)fixed, FALSE);
-         SendDlgItemMessage(hwndDlg, IDC_CLEAR_STACK, WM_SETFONT, (WPARAM)fixed, FALSE);
-
-         int len = 8;
-         f = getFunctionInfo(unemulatedName);
-         if (f) {
-            len = f->stackItems;
-            qsnprintf(buf, sizeof(buf), "0x%8.8x", f->result);
-            SetDlgItemText(hwndDlg, IDC_RETURN_VALUE, buf);
-            SetDlgItemInt(hwndDlg, IDC_CLEAR_STACK, f->stackItems, FALSE);
-            CheckRadioButton(hwndDlg, IDC_CALL_CDECL, IDC_CALL_STDCALL, 
-               (f->callingConvention == CALL_CDECL) ? IDC_CALL_CDECL : IDC_CALL_STDCALL); 
-            char *ret_type = getFunctionReturnType(f);
-            if (ret_type) {
-               qsnprintf(buf, sizeof(buf), "Return type: %s", ret_type);
-               SendDlgItemMessage(hwndDlg, IDC_RETURN_LABEL, WM_SETTEXT, (WPARAM)0, (LPARAM)buf);
-               free(ret_type);
-            }
-         }
-/*
-         else {
-            CheckRadioButton(hwndDlg, IDC_CALL_CDECL, IDC_CALL_STDCALL, IDC_CALL_CDECL); 
-         }         
-*/
-
-#if IDA_SDK_VERSION >= 540
-         uint32 arglocs[20];
+   int len = 8;
+   FunctionInfo *f = getFunctionInfo(func);
+   if (f) {
+      len = f->stackItems;
+   }
+#if IDA_SDK_VERSION >= 520
+   func_type_info_t info;
 #else
-         ulong arglocs[20];
+   ulong arglocs[20];
+   type_t *types[20];
+   char *names[20];
 #endif
-         type_t *types[20];
-         char *names[20];
-         int haveIdaTypeInfo = f && f->type && len;
-         if (haveIdaTypeInfo) {
-            build_funcarg_arrays(f->type, f->fields, arglocs,
-                                 types, names, 20, true);
-         }
-         int maxLength = 0;
-         HDC hdc = CreateDC("DISPLAY", NULL, NULL, NULL);
-         SelectObject(hdc, fixed);
-         for (int i = 0; i < len; i++) {
-            dword parm = readMem(esp + i * 4, SIZE_DWORD);
-            if (haveIdaTypeInfo) {
-               //change to incorporate what we know from Ida
-               char type_str[128];
-               print_type_to_one_line(type_str, sizeof(type_str), NULL, types[i]);
-               qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]", 
-                        i, parm, type_str, names[i] ? names[i] : "");
-               if (isStringPointer(type_str)) {
-                  //read string from database at address parm and append to buf
-                  char *val = getString(parm);
+   int haveIdaTypeInfo = f && f->type && len;
+   if (haveIdaTypeInfo) {
+#if IDA_SDK_VERSION >= 520  
+      build_funcarg_info(ti, f->type, f->fields,
+                         &info, BFI_NOCONST);
+#else
+      build_funcarg_arrays(f->type, f->fields, arglocs,
+                           types, names, 20, true);
+#endif
+   }
+   for (int i = 0; i < len; i++) {
+      dword parm = readMem(esp + i * 4, SIZE_DWORD);
+      if (haveIdaTypeInfo) {
+         //change to incorporate what we know from Ida
+         char type_str[128];
+#if IDA_SDK_VERSION >= 520  
+         print_type_to_one_line(type_str, sizeof(type_str), NULL, info[i].type.c_str());
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]", 
+                  i, parm, type_str, info[i].name.c_str());
+#else
+         print_type_to_one_line(type_str, sizeof(type_str), NULL, types[i]);
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]", 
+                  i, parm, type_str, names[i] ? names[i] : "");
+#endif
+         if (isStringPointer(type_str)) {
+            //read string from database at address parm and append to buf
+            char *val = getString(parm);
 #if IDA_SDK_VERSION < 480
-                  int len = strlen(buf);
-                  qsnprintf(buf + len, sizeof(buf) - len, " '%s'", val); 
+            int len = strlen(buf);
+            ::qsnprintf(buf + len, sizeof(buf) - len, " '%s'", val); 
 #else
-                  qstrncat(buf, " '", sizeof(buf));
-                  qstrncat(buf, val, sizeof(buf));
-                  qstrncat(buf, "'", sizeof(buf));
+            qstrncat(buf, " '", sizeof(buf));
+            qstrncat(buf, val, sizeof(buf));
+            qstrncat(buf, "'", sizeof(buf));
 #endif
-                  free(val);
-               }
-            }
-            else {
-               qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x", i, parm);
-            }
-            SendDlgItemMessage(hwndDlg, IDC_PARM_LIST, LB_ADDSTRING, (WPARAM)0, (LPARAM)buf);
-            SIZE sz;
-            GetTextExtentPoint32(hdc, buf, strlen(buf), &sz);
-            if (sz.cx > maxLength) {
-               maxLength = sz.cx;
-            }
+            free(val);
          }
-         SendDlgItemMessage(hwndDlg, IDC_PARM_LIST, LB_SETHORIZONTALEXTENT, (WPARAM)maxLength, (LPARAM)0);
-         DeleteDC(hdc);
-         if (haveIdaTypeInfo) {
-            free_funcarg_arrays(types, names, len);   
-         }
-         return TRUE; 
       }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDOK: {//OK Button 
-               dword retval = 0;
-               GetDlgItemText(hwndDlg, IDC_RETURN_VALUE, buf, sizeof(buf));
-               if (strlen(buf)) {
-                  retval = strtoul(buf, NULL, 0);
-                  eax = retval;
-               }
-
-               GetDlgItemText(hwndDlg, IDC_CLEAR_STACK, buf, sizeof(buf));
-               dword stackfree = strtoul(buf, NULL, 0);
-               dword callType = 0xFFFFFFFF;
-               if (IsDlgButtonChecked(hwndDlg, IDC_CALL_CDECL) == BST_CHECKED) {
-                  callType = CALL_CDECL;
-               }
-               else if (IsDlgButtonChecked(hwndDlg, IDC_CALL_STDCALL) == BST_CHECKED) {
-                  callType = CALL_STDCALL;
-               }
-               else {
-                  MessageBox(hwndDlg, "Please select a calling convention.", 
-                             "Error", MB_OK | MB_ICONWARNING);
-               }
-               if (callType != 0xFFFFFFFF) {
-                  addFunctionInfo(unemulatedName, retval, stackfree, callType);
-                  if (callType == CALL_STDCALL) {
-                     esp += stackfree * 4;
-                  }
-                  EndDialog(hwndDlg, 0);
-               }
-               return true;
-            } 
-         } 
-   } 
-   return FALSE; 
+      else {
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x", i, parm);
+      }
+      (*cb)(func, buf, i, user);
+   }
+#if IDA_SDK_VERSION < 520
+   if (haveIdaTypeInfo) {
+      free_funcarg_arrays(types, names, len);   
+   }
+#endif
 }
+
 
 /*
  * This function is used for all unemulated API functions
@@ -690,272 +619,75 @@ void EmuUnemulatedCB(dword addr, const char *name) {
    static char format[] = "%s called (0x%8.8x) without an emulation. Check your stack layout!";
    int len = sizeof(format) + (name ? strlen(name) : 3) + 20;
    char *mesg = (char*) malloc(len);
-   qsnprintf(mesg, len, format, name ? name : "???", addr);
+   ::qsnprintf(mesg, len, format, name ? name : "???", addr);
    msg("x86emu: %s\n", mesg);
    free(mesg);
-   unemulatedName = name;
-   unemulatedAddr = addr;
-   DialogBox(hModule, MAKEINTRESOURCE(IDD_UNEMULATED), x86Dlg, UnemulatedDlgProc);
+   restoreCursor();
+   handleUnemulatedFunction(addr, name);
    shouldBreak = 1;
 }
 
-/*
- * Ask the user which thread they would like to switch to
- * and make the necessary changes to the cpu state.
- */
-BOOL CALLBACK SwitchThreadDlgProc(HWND hwndDlg, UINT message, 
-                                  WPARAM wParam, LPARAM lParam) { 
-   char buf[64];
-   switch (message) { 
-      case WM_INITDIALOG: {
-         SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, WM_SETFONT, (WPARAM)fixed, FALSE);
-
-         for (ThreadNode *tn = threadList; tn; tn = tn->next) {
-            qsnprintf(buf, sizeof(buf), "Thread 0x%x%s", tn->handle, tn->next ? "" : " (main)");
-            SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, LB_ADDSTRING, (WPARAM)0, (LPARAM)buf);
+void switchThread(int tidx) {
+   int idx = 0;
+   for (ThreadNode *tn = threadList; tn; tn = tn->next, idx++) {
+      if (idx == tidx) {
+         if (tn != activeThread) {
+            emu_switch_threads(tn);
+            syncDisplay();
+            setTitle();
          }
-         return TRUE; 
+         msg("x86emu: Switched to thread 0x%x\n", tn->handle);
+         break;
       }
-      case WM_COMMAND: { 
-         int selected, idx = 0;
-         switch (LOWORD(wParam)) { 
-            case IDOK: //Switch Button 
-               selected = SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, LB_GETCURSEL, 0, 0);
-               if (selected != LB_ERR) {
-                  for (ThreadNode *tn = threadList; tn; tn = tn->next, idx++) {
-                     if (idx == selected) {
-                        if (tn != activeThread) {
-                           emu_switch_threads(tn);
-                           syncDisplay();
-                           setTitle();
-                        }
-                        msg("x86emu: Switched to thread 0x%x\n", tn->handle);
-                        break;
-                     }
-                  }   
-               }
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
-            case ID_DESTROY: //Destroy Button 
-               selected = SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, LB_GETCURSEL, 0, 0);
-               if (selected != LB_ERR) {
-                  for (ThreadNode *tn = threadList; tn; tn = tn->next, idx++) {
-                     if (idx == selected) {
-                        ThreadNode *newThread = emu_destroy_thread(tn->handle);
-                        if (newThread != activeThread) {
-                           emu_switch_threads(newThread);
-                           syncDisplay();
-                           setTitle();
-                        }
-                        break;
-                     }
-                  }   
-               }
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
-            case IDCANCEL: //CANCEL Button 
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
-         } 
-      }
-   } 
-   return FALSE; 
+   }
 }
 
-BOOL CALLBACK SegmentDlgProc(HWND hwndDlg, UINT message, 
-                             WPARAM wParam, LPARAM lParam) { 
-   char buf[16];
-   int i;
-   switch (message) { 
-      case WM_INITDIALOG: {
-         for (i = IDC_CS_REG; i <= IDC_GS_BASE; i++) {
-            SendDlgItemMessage(hwndDlg, i, WM_SETFONT, (WPARAM)fixed, FALSE);
-            if (i < IDC_CS_BASE) {
-               qsnprintf(buf, sizeof(buf), "0x%4.4X", cpu.segReg[i - IDC_CS_REG]);
-            }
-            else {
-               qsnprintf(buf, sizeof(buf), "0x%08X", cpu.segBase[i - IDC_CS_BASE]);
-            }
-            SetDlgItemText(hwndDlg, i, buf);
+void destroyThread(int tidx) {
+   int idx = 0;
+   for (ThreadNode *tn = threadList; tn; tn = tn->next, idx++) {
+      if (idx == tidx) {
+         ThreadNode *newThread = emu_destroy_thread(tn->handle);
+         if (newThread != activeThread) {
+            emu_switch_threads(newThread);
+            syncDisplay();
+            setTitle();
          }
-         return TRUE; 
+         break;
       }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDOK: //OK Button 
-               for (i = IDC_CS_REG; i <= IDC_GS_BASE; i++) {
-//                  dword newVal;
-                  GetDlgItemText(hwndDlg, i, buf, 16);
-                  dword newVal = strtoul(buf, NULL, 0);
-//                  sscanf(buf, "%X", &newVal);
-                  if (i < IDC_CS_BASE) {
-                     cpu.segReg[i  - IDC_CS_REG] = (short)newVal;
-                  }
-                  else {
-                     cpu.segBase[i - IDC_CS_BASE] = newVal;
-                  }
-               }
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
-            case IDCANCEL: //CANCEL Button 
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
-         } 
-   } 
-   return FALSE; 
-} 
-
-BOOL CALLBACK MemoryDlgProc(HWND hwndDlg, UINT message, 
-                            WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
-      case WM_INITDIALOG: {
-         char buf[16];
-         for (int i = IDC_STACKTOP; i <= IDC_HEAPSIZE; i++) {
-//            HWND ctl = GetDlgItem(hwndDlg, i);
-            SendDlgItemMessage(hwndDlg, i, WM_SETFONT, (WPARAM)fixed, FALSE);
-         }
-         segment_t *s = get_segm_by_name(".stack");
-         segment_t *h = get_segm_by_name(".heap");
-         qsnprintf(buf, sizeof(buf), "0x%08X", s->endEA);
-         SetDlgItemText(hwndDlg, IDC_STACKTOP, buf);
-         qsnprintf(buf, sizeof(buf), "0x%08X", s->endEA - s->startEA);
-         SetDlgItemText(hwndDlg, IDC_STACKSIZE, buf);
-         qsnprintf(buf, sizeof(buf), "0x%08X", h->startEA);
-         SetDlgItemText(hwndDlg, IDC_HEAPBASE, buf);
-         qsnprintf(buf, sizeof(buf), "0x%08X", h->endEA - h->startEA);
-         SetDlgItemText(hwndDlg, IDC_HEAPSIZE, buf);
-         return TRUE; 
-      }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-         case IDOK: {//OK Button 
-/*
-               mgr->initStack(getEditBoxInt(hwndDlg, IDC_STACKTOP), 
-                              getEditBoxInt(hwndDlg, IDC_STACKSIZE));
-               esp = mgr->stack->getStackTop();
-               unsigned int heapSize = getEditBoxInt(hwndDlg, IDC_HEAPSIZE);
-               if (heapSize) {
-                  mgr->initHeap(getEditBoxInt(hwndDlg, IDC_HEAPBASE), heapSize);
-               }
-               SendDlgItemMessage(x86Dlg, IDC_MEMORY, LB_RESETCONTENT, 0, 0);
-               listTop = mgr->stack->getStackTop() - 1;
-               syncDisplay();
-*/
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
-            }
-         case IDCANCEL: //Cancel Button 
-            EndDialog(hwndDlg, 0);
-            return TRUE; 
-         } 
-   } 
-   return FALSE; 
+   }   
 }
 
-//ask user for an file name and load the file into memory
+//ask user for an file name and load the entire file into memory
 //at the specified address
 void memLoadFile(dword start) {
-   OPENFILENAME ofn;
    char szFile[260];       // buffer for file name
    unsigned char buf[512];
    int readBytes;
    dword addr = start;
-   memset(&ofn, 0, sizeof(ofn));
-
-   // Initialize OPENFILENAME
-   ofn.lStructSize = sizeof(ofn);
-   ofn.hwndOwner = x86Dlg;
-   ofn.lpstrFile = szFile;
-   //
-   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
-   // use the contents of szFile to initialize itself.
-   //
-   *szFile = '\0';
-   ofn.nMaxFile = sizeof(szFile);
-   ofn.lpstrFilter = "All (*.*)\0*.*\0";
-   ofn.nFilterIndex = 1;
-   ofn.lpstrFileTitle = NULL;
-   ofn.nMaxFileTitle = 0;
-   ofn.lpstrInitialDir = NULL;
-   ofn.Flags = OFN_SHOWHELP | OFN_OVERWRITEPROMPT;         
-   if (GetOpenFileName(&ofn)) {
-      FILE *f = fopen(szFile, "rb");
-      while ((readBytes = fread(buf, 1, sizeof(buf), f)) > 0) {
-         patch_many_bytes(addr, buf, readBytes);
-         addr += readBytes;
-/*
-         ptr = buf;
-         for (; readBytes > 0; readBytes--) {
-            writeMem(addr++, *ptr++, SIZE_BYTE);
-         }
-*/
-      }
-      fclose(f);
-   }
-   msg("x86emu: Loaded 0x%X bytes from file %s to address 0x%X\n", addr - start, szFile, start);
-}
-
-BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message, 
-                               WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
-      case WM_INITDIALOG: {
-         char buf[32];
-         qsnprintf(buf, sizeof(buf), "0x%08X", (dword)get_screen_ea());
-         SendDlgItemMessage(hwndDlg, IDC_MEM_ADDR, WM_SETFONT, (WPARAM)fixed, FALSE);
-         SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_SETFONT, (WPARAM)fixed, FALSE);
-         SetDlgItemText(hwndDlg, IDC_MEM_ADDR, buf);
-         SetDlgItemText(hwndDlg, IDC_MEM_VALUES, "");
-         CheckRadioButton(hwndDlg, IDC_HEX_BYTES, IDC_MEM_LOADFILE, IDC_HEX_DWORDS); 
-         return TRUE; 
-      }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-         case IDOK: {//OK Button 
-               dword btn;
-               dword addr = getEditBoxInt(hwndDlg, IDC_MEM_ADDR);
-               dword len = SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_GETTEXTLENGTH, (WPARAM)0, (LPARAM)0);
-               char *vals = (char*) malloc(len + 1);
-               char *v = vals;
-               GetDlgItemText(hwndDlg, IDC_MEM_VALUES, vals, len + 1);
-               vals[len] = 0;
-               for (btn = IDC_HEX_BYTES; btn <= IDC_MEM_LOADFILE; btn++) {
-                  if (IsDlgButtonChecked(hwndDlg, btn) == BST_CHECKED) break;
-               }
-               switch (btn) {
-               case IDC_MEM_LOADFILE:
-                  memLoadFile(addr);
-                  break;
-               case IDC_MEM_ASCII: case IDC_MEM_ASCIIZ:
-                  while (*v) writeMem(addr++, *v++, SIZE_BYTE);
-                  if (btn == IDC_MEM_ASCIIZ) writeMem(addr, 0, SIZE_BYTE);
-                  break;
-               case IDC_HEX_BYTES: case IDC_HEX_WORDS: case IDC_HEX_DWORDS: {
-                     dword sz = btn - IDC_HEX_BYTES + 1;
-                     char *ptr;
-                     while (ptr = strchr(v, ' ')) {
-                        *ptr++ = 0;
-                        if (strlen(v)) {
-                           writeMem(addr, strtoul(v, NULL, 16), sz);
-                           addr += sz;
-                        }
-                        v = ptr;
-                     }
-                     if (strlen(v)) {
-                        writeMem(addr, strtoul(v, NULL, 16), sz);
-                     }
-                     break;
-                  }
-               }
-               free(vals);
-               EndDialog(hwndDlg, 0);
-               return TRUE; 
+#ifndef __QT__
+   const char *filter = "All (*.*)\0*.*\0";
+#else
+   const char *filter = "All (*.*)";
+#endif
+   szFile[0] = 0;
+   char *fileName = getOpenFileName("Load memory from file", szFile, sizeof(szFile), filter);
+   if (fileName) {
+      FILE *f = qfopen(szFile, "rb");
+      if (f) {
+         while ((readBytes = qfread(f, buf, sizeof(buf))) > 0) {
+            patch_many_bytes(addr, buf, readBytes);
+            addr += readBytes;
+   /*
+            ptr = buf;
+            for (; readBytes > 0; readBytes--) {
+               writeMem(addr++, *ptr++, SIZE_BYTE);
             }
-         case IDCANCEL: //Cancel Button 
-            EndDialog(hwndDlg, 0);
-            return TRUE; 
-         } 
-   } 
-   return FALSE; 
+   */
+         }
+         qfclose(f);
+      }
+      msg("x86emu: Loaded 0x%X bytes from file %s to address 0x%X\n", addr - start, szFile, start);
+   }
 }
 
 //skip the instruction at eip
@@ -965,85 +697,57 @@ void skip() {
    syncDisplay();
 }
 
-int doBreak() {
-   return shouldBreak || (GetKeyState(VK_CANCEL) & 0x8000);
-}
-
-void pump(HWND hWnd) {
-   MSG msg;
-   if (PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
-      GetMessage(&msg, NULL, 0, 0);
-      if(!IsDialogMessage(hWnd, &msg)) {
-         TranslateMessage(&msg);
-         DispatchMessage(&msg);
-      }
-   }   
-}
-
 void grabStackBlock() {
    char msg_buf[128];
-   if (inputBox("Stack space", "How many bytes of stack space?", "")) {
+   char *bytes = inputBox("Stack space", "How many bytes of stack space?", "");
+   if (bytes) {
       char *endptr;
-      dword size = strtoul(value, &endptr, 0);
+      dword size = strtoul(bytes, &endptr, 0);
       if (*endptr) {
-         qsnprintf(msg_buf, sizeof(msg_buf), "Invalid number: %s, cancelling stack allocation", value);
-         MessageBox(x86Dlg, msg_buf, "Error", MB_OK | MB_ICONWARNING);
+         ::qsnprintf(msg_buf, sizeof(msg_buf), "Invalid number: %s, cancelling stack allocation", bytes);
+         showErrorMessage(msg_buf);
          return;
       }
       size = (size + 3) & ~3;
       if (size) {
          esp -= size;
-         qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes allocated in the stack at 0x%08.8x", size, esp);
-         MessageBox(x86Dlg, msg_buf, "Success", MB_OK);
-         updateRegister(IDC_ESP, esp);
+         ::qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes allocated in the stack at 0x%08x", size, esp);
+         showInformationMessage("Success", msg_buf);
+         updateRegisterDisplay(ESP);
       }
       else {
-         MessageBox(x86Dlg, "No bytes were allocated in the stack", 
-                    "Error", MB_OK | MB_ICONWARNING);
+         showErrorMessage("No bytes were allocated in the stack"); 
       }
    }
 }
 
 void grabHeapBlock() {
    char msg_buf[128];
-   if (inputBox("Heap space", "How many bytes of heap space?", "")) {
+   char *bytes = inputBox("Heap space", "How many bytes of heap space?", "");
+   if (bytes) {
       char *endptr;
-      dword size = strtoul(value, &endptr, 0);
+      dword size = strtoul(bytes, &endptr, 0);
       if (*endptr) {
-         qsnprintf(msg_buf, sizeof(msg_buf), "Invalid number: %s, cancelling heap allocation", value);
-         MessageBox(x86Dlg, msg_buf, "Error", MB_OK | MB_ICONWARNING);
+         ::qsnprintf(msg_buf, sizeof(msg_buf), "Invalid number: %s, cancelling heap allocation", bytes);
+         showErrorMessage(msg_buf);
          return;
       }
       if (size) {
          dword block = HeapBase::getHeap()->calloc(size, 1);
-         qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes allocated in the heap at 0x%08.8x", size, block);
-         MessageBox(x86Dlg, msg_buf, "Success", MB_OK);
+         ::qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes allocated in the heap at 0x%08x", size, block);
+         showInformationMessage("Success", msg_buf);
       }
       else {
-         MessageBox(x86Dlg, "No bytes were allocated in the heap", 
-                    "Error", MB_OK | MB_ICONWARNING);
+         showErrorMessage("No bytes were allocated in the heap");
       }
    }
 }
 
 void grabMmapBlock() {
+   unsigned int base;
+   unsigned int size;
    char msg_buf[128];
-   int result = DialogBox(hModule, MAKEINTRESOURCE(IDD_MMAP),
-                          x86Dlg, MmapDlgProc);
-   if (result == 2) {
-      char *endptr;
-      dword size = strtoul(mmap_size, &endptr, 0);
-      if (*endptr) {
-         qsnprintf(msg_buf, sizeof(msg_buf), "Invalid mmap size: %s, cancelling mmap allocation", mmap_size);
-         MessageBox(x86Dlg, msg_buf, "Error", MB_OK | MB_ICONWARNING);
-         return;
-      }
-      dword base = strtoul(mmap_base, &endptr, 0);
-      if (*endptr) {
-         qsnprintf(msg_buf, sizeof(msg_buf), "Invalid mmap base: %s, cancelling mmap allocation", mmap_base);
-         MessageBox(x86Dlg, msg_buf, "Error", MB_OK | MB_ICONWARNING);
-         return;
-      }
+   if (getMmapBlockData(&base, &size)) {
       if (size) {
          dword rbase = base & 0xFFFFF000;
          if (base) {
@@ -1054,12 +758,11 @@ void grabMmapBlock() {
             size = (size + 0xFFF) & 0xFFFFF000;
          }
          base = MemMgr::mmap(rbase, size, 0, 0);
-         qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes mmap'ed at 0x%08.8x", size, base);
-         MessageBox(x86Dlg, msg_buf, "Success", MB_OK);
+         ::qsnprintf(msg_buf, sizeof(msg_buf), "%d bytes mmap'ed at 0x%08x", size, base);
+         showInformationMessage("Success", msg_buf);
       }
       else {
-         MessageBox(x86Dlg, "No bytes were mmap'ed", 
-                    "Error", MB_OK | MB_ICONWARNING);
+         showErrorMessage("No bytes were mmap'ed");
       }
    }
 }
@@ -1096,7 +799,7 @@ void traceOne() {
 void run() {
    ThreadNode *currThread = activeThread;
    codeCheck();
-   HCURSOR old = SetCursor(waitCursor);
+   showWaitCursor();
    //tell the cpu that we want to run free
    shouldBreak = 0;
    while (!isBreakpoint(cpu.eip) && !shouldBreak) {
@@ -1104,7 +807,7 @@ void run() {
       executeInstruction();
    }
    syncDisplay();
-   SetCursor(old);
+   restoreCursor();
    //may have switched threads due to thread exit
    if (currThread != activeThread) {
       setTitle();
@@ -1114,328 +817,25 @@ void run() {
 void trace() {
    ThreadNode *currThread = activeThread;
    codeCheck();
-   HCURSOR old = SetCursor(waitCursor);
+   showWaitCursor();
    //tell the cpu that we want to run free
    shouldBreak = 0;
    while (!isBreakpoint(cpu.eip) && !shouldBreak) {
-//                  pump(hwndDlg);
       executeInstruction();
    }
-   SetCursor(old);
+   restoreCursor();
    //may have switched threads due to thread exit
    if (currThread != activeThread) {
       setTitle();
    }
 }
 
-//This is the main callback function for the emulator interface
-BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message, 
-                      WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
-      case WM_INITDIALOG: {
-         x86Dlg = hwndDlg;
-         setTitle();
-         if (!cpuInit) {
-            cpu.eip = get_screen_ea();
-         }
-         waitCursor = LoadCursor(NULL, IDC_WAIT); 
-         for (int i = IDC_EAX; i <= IDC_EFLAGS; i++) {
-            HWND ctl = GetDlgItem(hwndDlg, i);
-            editBoxes[i - IDC_EAX] = ctl;
-            oldProc = SetWindowLong(ctl, GWL_WNDPROC, (LONG) EditSubclassProc);
-            SendDlgItemMessage(hwndDlg, i, WM_SETFONT, (WPARAM)fixed, FALSE);
-         }
-         SendDlgItemMessage(hwndDlg, IDC_MEMORY, WM_SETFONT, (WPARAM)fixed, FALSE);
-         syncDisplay();
-         return TRUE; 
-      }
-      case WM_CHAR:
-         if (wParam == VK_CANCEL) {
-            shouldBreak = 1;
-         }
-         break;
-      case WM_COMMAND: {
-         char loc[32];
-         ThreadNode *currThread = activeThread;
-         switch (LOWORD(wParam)) { 
-            case IDC_HEAP_LIST: {
-               const MallocNode *n = HeapBase::getHeap()->heapHead();
-               msg("x86emu: Heap Status ---\n");
-               while (n) {
-                  unsigned int sz = n->getSize();
-                  unsigned int base = n->getBase();
-                  msg("   0x%x-0x%x (0x%x bytes)\n", base, base + sz - 1, sz); 
-                  n = n->nextNode();
-               }
-               break;
-            }
-            case IDC_RESET: //reset the display/emulator
-               resetCpu();
-               cpu.eip = get_screen_ea();
-               syncDisplay();
-               return TRUE;
-            case IDC_STEP: //STEP 
-               stepOne();
-               return TRUE; 
-            case IDC_JUMP_CURSOR: //Reset eip.cursor
-               cpu.eip = get_screen_ea();
-               syncDisplay();
-               return TRUE;
-            case IDC_RUN: {//Run
-               run();
-               return TRUE;
-            }
-            case IDC_SKIP: //Skip the next instruction
-               skip();
-               return TRUE;
-            case IDC_RUN_TO_CURSOR: {//Run to cursor
-               codeCheck();
-               HCURSOR old = SetCursor(waitCursor);
-               dword endAddr = get_screen_ea();
-               //tell the cpu that we want to run free
-               shouldBreak = 0;
-               while (cpu.eip != endAddr && !shouldBreak) {
-                  executeInstruction();
-               }
-               syncDisplay();
-               SetCursor(old);
-               codeCheck();
-               //may have switched threads due to thread exit
-               if (currThread != activeThread) {
-                  setTitle();
-               }
-               return TRUE; 
-            }
-            case IDC_HIDE: 
-               ShowWindow(hwndDlg, SW_HIDE);    
-               return TRUE; 
-            case IDC_MEMORY:
-               if (HIWORD(wParam) == LBN_DBLCLK) {
-                  //modify stack contents in here
-               }
-               return TRUE;
-            case IDC_SET_MEMORY:
-               DialogBox(hModule, MAKEINTRESOURCE(IDD_SET_MEMORY),
-                         x86Dlg, SetMemoryDlgProc);
-               return TRUE;
-            case IDC_PUSH:
-               pushData();
-               return TRUE;
-            case IDC_DUMP: 
-               dumpRange();
-               return TRUE;
-            case IDC_DUMP_PE: 
-               dumpEmbededPE();
-               return TRUE;
-            case IDC_SEGMENTS: 
-               DialogBox(hModule, MAKEINTRESOURCE(IDD_SEGMENTDIALOG),
-                         x86Dlg, SegmentDlgProc);
-               return TRUE;
-            case IDC_SETTINGS: 
-               DialogBox(hModule, MAKEINTRESOURCE(IDD_MEMORY),
-                         x86Dlg, MemoryDlgProc);
-               return TRUE;
-            case IDC_TRACK: {
-               HMENU menu = GetMenu(x86Dlg);
-               if (doTrack) {
-                  CheckMenuItem(menu, IDC_TRACK, MF_BYCOMMAND | MF_UNCHECKED);
-               }
-               else {
-                  CheckMenuItem(menu, IDC_TRACK, MF_BYCOMMAND | MF_CHECKED);
-               } 
-               doTrack = !doTrack;
-               return TRUE;
-            }
-            case IDC_TRACE: {
-               HMENU menu = GetMenu(x86Dlg);
-               if (doTrace) {
-                  CheckMenuItem(menu, IDC_TRACE, MF_BYCOMMAND | MF_UNCHECKED);
-                  closeTrace();
-               }
-               else {
-                  char buf[260];
-                  CheckMenuItem(menu, IDC_TRACE, MF_BYCOMMAND | MF_CHECKED);
-                  closeTrace();
-                  OPENFILENAME ofn;       // common dialog box structure
-                  
-                  // Initialize OPENFILENAME
-                  ZeroMemory(&ofn, sizeof(ofn));
-                  ofn.lStructSize = sizeof(ofn);
-                  ofn.hwndOwner = x86Dlg;
-                  ofn.lpstrFile = buf;
-                  //
-                  // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
-                  // use the contents of szFile to initialize itself.
-                  //
-                  ofn.lpstrFile[0] = '\0';
-                  ofn.nMaxFile = sizeof(buf);
-                  ofn.lpstrFilter = "All (*.*)\0*.*\0Trace files (*.trc)\0*.trc\0";
-                  ofn.nFilterIndex = 1;
-                  ofn.lpstrFileTitle = NULL;
-                  ofn.nMaxFileTitle = 0;
-                  ofn.lpstrInitialDir = NULL;
-                  ofn.Flags = OFN_OVERWRITEPROMPT;
-                  
-                  // Display the Open dialog box. 
-                  if (GetSaveFileName(&ofn)) {
-                     traceFile = fopen(buf, "w");
-                  }
-               } 
-               doTrace = !doTrace;
-               return TRUE;
-            }            
-            case IDC_GPA: {//set a GetProcAddress save point
-               qsnprintf(loc, sizeof(loc), "0x%08X", (dword)get_screen_ea());
-               if (inputBox("Import Address Save Point", "Specify location of import address save", loc)) {
-                  importSavePoint = strtoul(value, NULL, 0);
-//                  sscanf(value, "%X", &importSavePoint);
-               }
-               return TRUE;
-            }
-            case IDC_BREAKPOINT: {
-//               dword bp;
-               qsnprintf(loc, sizeof(loc), "0x%08X", (dword)get_screen_ea());
-               if (inputBox("Set Breakpoint", "Specify breakpoint location", loc)) {
-                  dword bp = strtoul(value, NULL, 0);
-//                  sscanf(value, "%X", &bp);                
-                  addBreakpoint(bp);
-               }
-               return TRUE;
-            }
-            case IDC_CLEARBREAK: {
-//               dword bp;
-               qsnprintf(loc, sizeof(loc), "0x%08X", (dword)get_screen_ea());
-               if (inputBox("Remove Breakpoint", "Specify breakpoint location", loc)) {
-//                  sscanf(value, "%X", &bp);
-                  dword bp = strtoul(value, NULL, 0);
-                  removeBreakpoint(bp);
-               }
-               return TRUE;
-            }
-            case IDC_MEMEX:
-               cpu.initial_eip = cpu.eip;  //since we are not going through executeInstruction
-               memoryAccessException();
-               syncDisplay();
-               return TRUE;
-            case IDC_EXPORT: {
-//               dword export_addr;
-               qsnprintf(loc, sizeof(loc), "0x%08X", eax);
-               if (inputBox("Export Lookup", "Specify export address", loc)) {
-//                  sscanf(value, "%X", &export_addr);
-                  dword export_addr = strtoul(value, NULL, 0);
-                  char *exp = reverseLookupExport(export_addr);
-                  if (exp) {
-//                     msg("x86emu: reverseLookupExport: %s\n", exp);
-                     int len = 20 + strlen(exp);
-                     char *mesg = (char*)malloc(len);
-                     qsnprintf(mesg, len, "0x%08X: %s", export_addr, exp);
-                     MessageBox(x86Dlg, mesg, "Export Lookup", MB_OK);
-                     free(mesg);
-                  }
-                  else {
-//                     msg("x86emu: reverseLookupExport failed\n");
-                     MessageBox(x86Dlg, "No name found", "Export Lookup", MB_OK);
-                  }
-               }
-               return TRUE;
-            }
-            case IDC_SWITCH: {
-               DialogBox(hModule, MAKEINTRESOURCE(IDD_SWITCH_THREAD),
-                         x86Dlg, SwitchThreadDlgProc);
-               return TRUE;
-            }
-            case IDC_HEAP_BLOCK: {
-               grabHeapBlock();
-               return TRUE;
-            }
-            case IDC_STACK_BLOCK: {
-               grabStackBlock();
-               return TRUE;
-            }
-            case IDC_MMAP_BLOCK: {
-               grabMmapBlock();
-               return TRUE;
-            }
-         } 
-      }
-   } 
-   return FALSE; 
-} 
-
-//subclassing procedure for the register edit controls.  only want to catch
-//double clicks here and open an edit window in response.  Otherwise, pass
-//the message along
-LRESULT EditSubclassProc(HWND hwndCtl, UINT message, 
-                         WPARAM wParam, LPARAM lParam) {
-   switch (message) {
-      case WM_LBUTTONDBLCLK:
-         doubleClick(hwndCtl);
-         return TRUE;
-   }
-   return CallWindowProc((WNDPROC) oldProc, hwndCtl, message, wParam, lParam);
-}
-
-//open an input dialog.  Use the globals, title, prompt, and initial to 
-//configure the dialog box.  return the user entry in global value
-BOOL CALLBACK InputDlgProc(HWND hwndDlg, UINT message, 
-                           WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
-      case WM_INITDIALOG:
-         SendDlgItemMessage(hwndDlg, IDC_DATA, WM_SETFONT, (WPARAM)fixed, FALSE);
-         SetDlgItemText(hwndDlg, IDC_MESSAGE, prompt);
-         SetDlgItemText(hwndDlg, IDC_DATA, initial);
-         SendMessage(hwndDlg, WM_SETTEXT, FALSE, (LPARAM)title);
-         return TRUE; 
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDC_DATA: //STEP 
-               return TRUE; 
-            case ID_OK: //STEP from cursor
-               GetDlgItemText(hwndDlg, IDC_DATA, value, 80);
-               EndDialog(hwndDlg, 2);
-               return TRUE; 
-            case ID_CANCEL: //Run
-               EndDialog(hwndDlg, -1);
-               return TRUE; 
-         } 
-   } 
-   return FALSE; 
-} 
-
-//open an mmap input dialog.
-BOOL CALLBACK MmapDlgProc(HWND hwndDlg, UINT message, 
-                           WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
-      case WM_INITDIALOG:
-         SendDlgItemMessage(hwndDlg, IDC_MMAP_SIZE, WM_SETFONT, (WPARAM)fixed, FALSE);
-         SetDlgItemInt(hwndDlg, IDC_MMAP_BASE, 0, FALSE);
-         SetDlgItemText(hwndDlg, IDC_MMAP_SIZE, "0x1000");
-         return TRUE; 
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDC_MMAP_BASE:
-               return TRUE; 
-            case IDC_MMAP_SIZE:
-               return TRUE; 
-            case ID_OK:
-               GetDlgItemText(hwndDlg, IDC_MMAP_BASE, mmap_base, 80);
-               GetDlgItemText(hwndDlg, IDC_MMAP_SIZE, mmap_size, 80);
-               EndDialog(hwndDlg, 2);
-               return TRUE; 
-            case ID_CANCEL: //Run
-               EndDialog(hwndDlg, -1);
-               return TRUE; 
-         } 
-   } 
-   return FALSE; 
-} 
-
 //
 // Called by IDA to notify the plug-in of certain UI events.
 // At the moment this is only used to catch the "saving" event
 // so that the plug-in can save its state in the database.
 //
-static int idaapi uiCallback(void *cookie, int code, va_list va) {
+static int idaapi uiCallback(void * /*cookie*/, int code, va_list /*va*/) {
    switch (code) {
    case ui_saving: {
       //
@@ -1479,6 +879,108 @@ static int idaapi uiCallback(void *cookie, int code, va_list va) {
    return 0;
 }
 
+void dumpHeap() {
+   const MallocNode *n = HeapBase::getHeap()->heapHead();
+   msg("x86emu: Heap Status ---\n");
+   while (n) {
+      unsigned int sz = n->getSize();
+      unsigned int base = n->getBase();
+      msg("   0x%x-0x%x (0x%x bytes)\n", base, base + sz - 1, sz); 
+      n = n->nextNode();
+   }
+}
+
+void doReset() {
+   resetCpu();
+   cpu.eip = get_screen_ea();
+   syncDisplay();
+}
+
+void jumpToCursor() {
+   cpu.eip = get_screen_ea();
+   syncDisplay();
+}
+
+void runToCursor() {
+   ThreadNode *currThread = activeThread;
+   codeCheck();
+   showWaitCursor();
+   dword endAddr = get_screen_ea();
+   //tell the cpu that we want to run free
+   shouldBreak = 0;
+   while (cpu.eip != endAddr && !shouldBreak) {
+      executeInstruction();
+   }
+   syncDisplay();
+   restoreCursor();
+   codeCheck();
+   //may have switched threads due to thread exit
+   if (currThread != activeThread) {
+      setTitle();
+   }
+}
+
+void tagImportAddressSavePoint() {
+   char loc[16];
+   ::qsnprintf(loc, sizeof(loc), "0x%08X", (dword)get_screen_ea());
+   char *addr = inputBox("Import Address Save Point", "Specify location of import address save", loc);
+   if (addr) {
+      importSavePoint = strtoul(addr, NULL, 0);
+//    sscanf(value, "%X", &importSavePoint);
+   }
+}
+
+void setBreakpoint() {
+   char loc[16];
+   ::qsnprintf(loc, sizeof(loc), "0x%08X", (dword)get_screen_ea());
+   char *bpt = inputBox("Set Breakpoint", "Specify breakpoint location", loc);
+   if (bpt) {
+      dword bp = strtoul(bpt, NULL, 0);
+//                  sscanf(value, "%X", &bp);                
+      addBreakpoint(bp);
+   }
+}
+
+void clearBreakpoint() {
+   char loc[16];
+   ::qsnprintf(loc, sizeof(loc), "0x%08X", (dword)get_screen_ea());
+   char *bpt = inputBox("Remove Breakpoint", "Specify breakpoint location", loc);
+   if (bpt) {
+//                  sscanf(value, "%X", &bp);
+      dword bp = strtoul(bpt, NULL, 0);
+      removeBreakpoint(bp);
+   }
+}
+
+void generateMemoryException() {
+   cpu.initial_eip = cpu.eip;  //since we are not going through executeInstruction
+   memoryAccessException();
+   syncDisplay();
+}
+
+void doExportLookup() {
+   char loc[16];
+   ::qsnprintf(loc, sizeof(loc), "0x%08X", eax);
+   char *addr = inputBox("Export Lookup", "Specify export address", loc);
+   if (addr) {
+//                  sscanf(value, "%X", &export_addr);
+      dword export_addr = strtoul(addr, NULL, 0);
+      char *exp = reverseLookupExport(export_addr);
+      if (exp) {
+//                     msg("x86emu: reverseLookupExport: %s\n", exp);
+         int len = 20 + strlen(exp);
+         char *mesg = (char*)qalloc(len);
+         ::qsnprintf(mesg, len, "0x%08X: %s", export_addr, exp);
+         showInformationMessage("Export Lookup", mesg);
+         qfree(mesg);
+      }
+      else {
+//                     msg("x86emu: reverseLookupExport failed\n");
+         showInformationMessage("Export Lookup", "No name found");
+      }
+   }
+}
+
 FILE *LoadHeadersCommon(dword addr, segment_t &s, bool createSeg = true) {
    char buf[260];
 #if (IDA_SDK_VERSION < 490)
@@ -1489,31 +991,15 @@ FILE *LoadHeadersCommon(dword addr, segment_t &s, bool createSeg = true) {
    FILE *f = fopen(buf, "rb");
 #endif
    if (f == NULL) {
-      MessageBox(x86Dlg, "Original input file not found.", 
-                 "Error", MB_OK | MB_ICONWARNING);
-
-      OPENFILENAME ofn;       // common dialog box structure
-      
-      // Initialize OPENFILENAME
-      ZeroMemory(&ofn, sizeof(ofn));
-      ofn.lStructSize = sizeof(ofn);
-      ofn.hwndOwner = x86Dlg;
-      ofn.lpstrFile = buf;
-      //
-      // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
-      // use the contents of szFile to initialize itself.
-      //
-      ofn.lpstrFile[0] = '\0';
-      ofn.nMaxFile = sizeof(buf);
-      ofn.lpstrFilter = "All (*.*)\0*.*\0Executable files (*.exe; *.dll)\0*.EXE;*.DLL\0";
-      ofn.nFilterIndex = 1;
-      ofn.lpstrFileTitle = NULL;
-      ofn.nMaxFileTitle = 0;
-      ofn.lpstrInitialDir = NULL;
-      ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-      
-      // Display the Open dialog box. 
-      if (GetOpenFileName(&ofn)) {
+      showErrorMessage("Original input file not found.");
+#ifndef __QT__
+      const char *filter = "All (*.*)\0*.*\0Executable files (*.exe; *.dll)\0*.EXE;*.DLL\0";
+#else
+      const char *filter = "All (*.*);;Executable files (*.exe; *.dll)";
+#endif
+      buf[0] = 0;
+      char *fname = getOpenFileName("Select input file", buf, sizeof(buf), filter);
+      if (fname) {
          f = fopen(buf, "rb");
       }
    }
@@ -1724,7 +1210,7 @@ void initListEntry(dword le) {
 }
 
 void initPebLdrData(dword pebLdrData) {
-   dword moduleList = pebLdrData + 0x1C;
+//   dword moduleList = pebLdrData + 0x1C;
    patch_long(pebLdrData - 4, 0);              //Count of loaded modules
    patch_long(pebLdrData, 0x24);              //Length
    patch_long(pebLdrData + 4, 1);          //Initialized
@@ -1783,14 +1269,15 @@ const char *win_xp_env[] = {
    NULL
 };
 
+//var must have been allocated using qalloc
 char *replace(char *var, const char *match, const char *sub) {
    char *res, *find;
-   while (find = strstr(var, match)) {
+   while ((find = strstr(var, match)) != NULL) {
       *find = 0;
       int len = strlen(var) + strlen(sub) - strlen(match) + 1;
-      res = (char*)malloc(len);
-      qsnprintf(res, len, "%s%s%s", var, sub, find + strlen(match));
-      free(var);
+      res = (char*)qalloc(len);
+      ::qsnprintf(res, len, "%s%s%s", var, sub, find + strlen(match));
+      qfree(var);
       var = res;
    }
    return var;
@@ -1799,20 +1286,20 @@ char *replace(char *var, const char *match, const char *sub) {
 Buffer *makeEnv(const char *env[], const char *userName, const char *hostName) {
    Buffer *res = new Buffer();
    for (int i = 0; env[i]; i++) {
-      char *ev = _strdup(env[i]);
+      char *ev = ::qstrdup(env[i]);
       ev = replace(ev, "$USER", userName);
       ev = replace(ev, "$HOST", hostName);
       if (strlen(userName) > 8) {
          char buf[10];
-         qstrncpy(buf, userName, 6);
-         qstrncpy(buf + 6, "~1", 3);
+         ::qstrncpy(buf, userName, 6);
+         ::qstrncpy(buf + 6, "~1", 3);
          ev = replace(ev, "$DOSUSER", buf);
       }
       else {
          ev = replace(ev, "$DOSUSER", userName);
       }
       res->write(ev, strlen(ev) + 1);
-      free(ev);
+      qfree(ev);
    }
    res->write("", 1);
    return res;
@@ -1820,7 +1307,7 @@ Buffer *makeEnv(const char *env[], const char *userName, const char *hostName) {
 
 //notification hook function for idb notifications
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
-int idaapi idb_hook(void *user_data, int notification_code, va_list va) {
+int idaapi idb_hook(void * /*user_data*/, int notification_code, va_list va) {
    if (notification_code == idb_event::byte_patched) {
       // A byte has been patched                      
       // in: ea_t ea                                  
@@ -1859,7 +1346,7 @@ void formatStack(dword begin, dword end) {
 #endif
 }
 
-void createWindowsStack(dword top, dword size) {
+void createWindowsStack(dword /*top*/, dword /*size*/) {
    esp = 0x130000;
    dword base = esp - 0x4000;
    MemMgr::mmap(base, 0x4000, 0, 0, ".stack");
@@ -2155,15 +1642,13 @@ int idaapi init(void) {
 
    imageTop = inf.maxEA;
 
-   mainWindow = (HWND)callui(ui_get_hwnd).vptr;
-
    resetCpu();
 
    if (netnode_exist(module_node)) {
       // There's a module_node in the database.  Attempt to
       // instantiate the module info list from it.
       unsigned char *buf = NULL;
-      dword sz;
+      size_t sz;
       msg("x86emu: Loading ModuleInfo state from existing netnode.\n");
 
       if ((buf = (unsigned char *)module_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
@@ -2210,7 +1695,7 @@ int idaapi init(void) {
       // There's a heap_node in the database.  Attempt to
       // instantiate the heap info from it.
       unsigned char *buf = NULL;
-      dword sz;
+      size_t sz;
       msg("x86emu: Loading HeapInfo state from existing netnode.\n");
       Buffer *b = NULL;
       if ((buf = (unsigned char *)heap_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
@@ -2239,7 +1724,7 @@ int idaapi init(void) {
       // There's a funcinfo_node in the database.  Attempt to
       // instantiate the function info list from it.
       unsigned char *buf = NULL;
-      dword sz;
+      size_t sz;
       msg("x86emu: Loading FunctionInfo state from existing netnode.\n");
 
       if ((buf = (unsigned char *)funcinfo_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
@@ -2251,7 +1736,7 @@ int idaapi init(void) {
       // There's a petable_node in the database.  Attempt to
       // instantiate the petable info list from it.
       unsigned char *buf = NULL;
-      dword sz;
+      size_t sz;
       msg("x86emu: Loading PETable state from existing netnode.\n");
 
       if ((buf = (unsigned char *)petable_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
@@ -2262,11 +1747,8 @@ int idaapi init(void) {
          petable_node.kill();
       }  
    }
-   fixed = (HFONT)GetStockObject(ANSI_FIXED_FONT);
 
    setUnemulatedCB(EmuUnemulatedCB);
-
-   hModule = GetModuleHandle("x86emu.plw");
 
    if (inf.filetype == f_PE) {
       setPEimageBase();
@@ -2293,7 +1775,11 @@ int idaapi init(void) {
 
 void idaapi term(void) {
    if (hProv) {
+#ifdef __NT__
       CryptReleaseContext(hProv, 0);
+#else
+      close(hProv);
+#endif
    }
    unregister_funcs();
    unhook_from_notification_point(HT_UI, uiCallback, NULL);
@@ -2303,11 +1789,10 @@ void idaapi term(void) {
       unhook_from_notification_point(HT_IDB, idb_hook, NULL);
    }
 #endif
-   DestroyWindow(x86Dlg);
+   destroyEmulatorWindow();
    closeTrace();
    doTrace = false;
    doTrack = false;
-   x86Dlg = NULL; 
 }
 
 //--------------------------------------------------------------------------
@@ -2323,8 +1808,8 @@ void idaapi term(void) {
 //
 //
 
-void idaapi run(int arg) {
-   if (x86Dlg == NULL) {
+void idaapi run(int /*arg*/) {
+   if (!isWindowCreated) {
       if (!netnode_exist(x86emu_node)) {
          //save basic info first time we encounter this database
          //BUT don't mark emulator as initialized
@@ -2409,12 +1894,14 @@ void idaapi run(int arg) {
       stackCC = get_current_viewer();
       mainForm = find_tform("IDA View-A");
       switchto_tform(mainForm, true);
-#endif      
-      x86Dlg = CreateDialog(hModule, MAKEINTRESOURCE(IDD_EMUDIALOG),
-                            mainWindow, DlgProc);
+#endif
+      if (!cpuInit) {
+         cpu.eip = get_screen_ea();
+      }
+      isWindowCreated = createEmulatorWindow();
    }
-   if (x86Dlg) {
-      ShowWindow(x86Dlg, SW_SHOW);
+   if (isWindowCreated) {
+      displayEmulatorWindow();
    }
    hook_to_notification_point(HT_UI, uiCallback, NULL);
 }

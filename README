@@ -1,11 +1,74 @@
 Save the tarball in the PLUGINS subdirectory of your IDA SDK subdirectory.
 Unpack it there so that you have something along the lines of: 
 
-<SDK_DIR>\plugins\ida-x86emu\...
+<SDK_DIR>\plugins\ida-x86emu\trunk
+
+---------------------------------------------------------------------------
+
+BUILDING THE QT VERSION OF THE PLUGIN
+
+Ida ships with a limited number of link libraries for Qt.  These may be found
+in <SDK>/lib/Qt.w32 on Windows.  On linux you may link against the .so files
+that ship with your Ida install.  On OS X you may link against they .dylib
+files that ship with your Ida install.
+
+In order to build the Qt version of the plugin for Ida versions 6.0 and later
+you will also need the Qt source code.  Ida 6.0 uses Qt version 4.6.3 whose
+source is available here 
+ftp://ftp.qt.nokia.com/qt/source/qt-everywhere-opensource-src-4.6.3.tar.gz
+here
+ftp://ftp.qt.nokia.com/qt/source/qt-everywhere-opensource-src-4.6.3.zip
+or here
+ftp://ftp.qt.nokia.com/qt/source/qt-win-opensource-4.6.3-vs2008.exe
+
+Before building the plugin, your Qt source must be properly configured.  See the
+Qt documentation for your platform regarding configuring Qt. The Qt libraries
+shipped with Ida are configured to wrap all of Qt in a QT namespace so a sample
+configuration might look like:
+
+configure -qtnamespace QT -no-openssl -no-dbus -shared -no-phonon-backend \
+ -no-phonon -no-audio-backend -no-multimedia -no-rtti -release -opensource \
+ -no-script -no-scripttools -no-webkit -nomake examples -nomake demos  \
+ -platform win32-msvc2008
+ 
+Change the -platform to linux-g++ or macx-g++ as appropriate
+
+Note that the Qt libraries shipped with the Windows version of Ida were built
+with Visual Studio, so the Windows version of the plugin will need to be 
+built using Visual Studio.
+
+Once Qt is configured, the Qt libraries need to be built.  On Windows, with 
+a properly configured Visual Studo command line environment, the nmake utility 
+may be used to compile Qt.  On linux gmake is used, and on OS X make is used.
+
+Once Qt has been confugred and built, the plugin can be built.  From the
+plugin's trunk directory, the first step is to create the required makefiles
+using Qt's qmake utility (which should be in your path):
+
+> qmake -o Makefile.msvc collab.pro -platform win32-msvc2008
+
+Of course you can name the output makefile anything you like and you should
+set the platform option appropriately.
+
+To complete the build on Windows, use Visual Studio's nmake utility, again
+assuming a properly configure command line build environment:
+
+> nmake -f Makefile.msvc
+
+You should find the compiled plugin at <SDK>/bin/plugins/x86emu_qt.plw
+
+Build scripts for Windows, linux, and OS X ship with ida-x86emu.  Within the
+trunk directory, the command
+> ./build.win32
+should perform the necessary steps to build the plugin (assuming Qt and Visual
+Studio environment variables are properly set)
 
 ---------------------------------------------------------------------------
 
 BUILDING WITH VISUAL C++ (VISUAL STUDIO 2008)
+
+These instructions are applicable only to the idag (native Windows) version
+of the plugin.
 
 The VC++ workspace file for VC++6.0 and is named: x86Emulator.dsw
 The VC++ solution file for Visual Studio 2005 and is named: x86Emulator_vs05.sln
@@ -22,7 +85,11 @@ may be possible to build from the command line.
 
 ---------------------------------------------------------------------------
 
-BUILDING WITH MinGW (My prefered method of building the plugin)
+BUILDING WITH MinGW (My prefered method of building the native Windows
+version of the plugin)
+
+These instructions are applicable only to the idag (native Windows) version
+of the plugin.
 
 The mingw makefile is: Makefile.  Build the plugin with the following
 command line:

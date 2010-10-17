@@ -1,0 +1,6 @@
+#!/bin/sh
+
+qmake -o Makefile.g++ x86emu.pro -platform macx-g++
+make -f Makefile.g++ clean
+make -f Makefile.g++
+cp ../../../bin/plugins/libx86emu_qt.1.0.0.dylib ../../../bin/plugins/x86emu_qt.pmc

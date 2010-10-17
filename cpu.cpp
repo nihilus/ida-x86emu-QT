@@ -1,6 +1,6 @@
 /*
    Source for x86 emulator
-   Copyright (c) 2003-2008 Chris Eagle
+   Copyright (c) 2003-2010 Chris Eagle
 
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -18,11 +18,8 @@
 */
 
 #include <stdio.h>
-#include <malloc.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
-
-#undef OVERFLOW
 
 #include "cpu.h"
 #include "seh.h"
@@ -85,7 +82,7 @@ FloatingPointUnit fpu;
 
 SSE2Registers sse2;
 
-uquad tsc; //timestamp counter
+ll_union tsc; //timestamp counter
 
 static uint segmentBase;   //base address for next memory operation
 static uint segmentReg;   //base address for next memory operation
@@ -437,7 +434,7 @@ void createLegacyStack(Buffer &b) {
 int loadState(netnode &f) {
    unsigned char *buf = NULL;
    unsigned int peek;
-   dword sz;
+   size_t sz;
    int personality = f.altval(HEAP_PERSONALITY);
    // Fetch the blob attached to the node.
    if ((buf = (unsigned char *)f.getblob(NULL, &sz, 0, 'B')) == NULL) return X86EMULOAD_NO_NETNODE;
@@ -589,11 +586,11 @@ void resetCpu() {
    }
    cpu.eip = 0xFFF0;
    //enable interrupts by default per Kris Kaspersky
-   cpu.eflags = IF | 2;
+   cpu.eflags = xIF | 2;
    cpu.gdtr.limit = cpu.idtr.limit = 0xFFFF;
    cs = 0xF000;  //base = 0xFFFF0000, limit = 0xFFFF
    cr0 = 0x60000010;
-   tsc = 0;
+   tsc.ll = 0;
    fpu.tag  = 0xFFFF;
    //need to clear the heap in here as well then allocate a new idt
 }
@@ -691,7 +688,7 @@ dword readMem(dword addr, byte size) {
 }
 
 dword readBuffer(dword addr, void *buf, dword nbytes) {
-   int result = 0;
+//   int result = 0;
    addr += segmentBase;
    for (dword i = 0; i < nbytes; i++) {
       ((unsigned char*)buf)[i] = readByte(addr + i);
@@ -736,7 +733,7 @@ void writeMem(dword addr, dword val, byte size) {
 }
 
 dword writeBuffer(dword addr, void *buf, dword nbytes) {
-   int result = 0;
+//   int result = 0;
    addr += segmentBase;
    for (dword i = 0; i < nbytes; i++) {
       writeByte(addr + i, (byte)((unsigned char*)buf)[i]);
@@ -1018,20 +1015,20 @@ void storeOperand(AddrInfo *op, dword val) {
 //deal with sign, zero, and parity flags
 void setEflags(qword val, byte size) {
    val &= SIZE_MASKS[size]; //mask off upper bytes
-   if (val) CLEAR(ZF);
-   else SET(ZF);
-   if (val & SIGN_BITS[size]) SET(SF);
-   else CLEAR(SF);
-   if (parityValues[val & 0xFF]) SET(PF);
-   else CLEAR(PF);
+   if (val) CLEAR(xZF);
+   else SET(xZF);
+   if (val & SIGN_BITS[size]) SET(xSF);
+   else CLEAR(xSF);
+   if (parityValues[val & 0xFF]) SET(xPF);
+   else CLEAR(xPF);
 }
 
 //Kris Kaspersky pointed out that the AF flag did not
 //function properly for normal adds and subtracts
 void checkAuxCarry(dword op1, dword op2, dword result) {
    bool aux = ((op1 ^ op2) & 0x10) != (result & 0x10);
-   if (aux) SET(AF);
-   else CLEAR(AF);
+   if (aux) SET(xAF);
+   else CLEAR(xAF);
 }
 
 bool hasAddOverflow(dword op1, dword op2, dword sum) {
@@ -1042,15 +1039,15 @@ bool hasAddOverflow(dword op1, dword op2, dword sum) {
 
 void checkAddOverflow(dword op1, dword op2, dword sum) {
    dword mask = SIGN_BITS[opsize];
-   if ((op1 & op2 & ~sum & mask) || (~op1 & ~op2 & sum & mask)) SET(OF);
-   else CLEAR(OF);
+   if ((op1 & op2 & ~sum & mask) || (~op1 & ~op2 & sum & mask)) SET(xOF);
+   else CLEAR(xOF);
 }
 
 dword add(qword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
    qword result = (op1 & mask) + (op2 & mask);
-   if (result & CARRY_BITS[opsize]) SET(CF);
-   else CLEAR(CF);
+   if (result & CARRY_BITS[opsize]) SET(xCF);
+   else CLEAR(xCF);
    checkAddOverflow((dword)op1, op2, (dword)result);
    setEflags(result, opsize);
    checkAuxCarry((dword)op1, (dword)op2, (dword)result);
@@ -1059,9 +1056,9 @@ dword add(qword op1, dword op2) {
 
 dword adc(qword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) + (op2 & mask) + C;
-   if (result & CARRY_BITS[opsize]) SET(CF);
-   else CLEAR(CF);
+   qword result = (op1 & mask) + (op2 & mask) + xC;
+   if (result & CARRY_BITS[opsize]) SET(xCF);
+   else CLEAR(xCF);
    checkAddOverflow((dword)op1, op2, (dword)result);
    setEflags(result, opsize);
    checkAuxCarry((dword)op1, (dword)op2, (dword)result);
@@ -1076,15 +1073,15 @@ bool hasSubOverflow(dword op1, dword op2, dword diff) {
 
 void checkSubOverflow(dword op1, dword op2, dword diff) {
    dword mask = SIGN_BITS[opsize];
-   if ((op1 & ~op2 & ~diff & mask) || (~op1 & op2 & diff & mask)) SET(OF);
-   else CLEAR(OF);
+   if ((op1 & ~op2 & ~diff & mask) || (~op1 & op2 & diff & mask)) SET(xOF);
+   else CLEAR(xOF);
 }
 
 dword sub(qword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
    qword result = (op1 & mask) - (op2 & mask);
-   if (result & CARRY_BITS[opsize]) SET(CF);
-   else CLEAR(CF);
+   if (result & CARRY_BITS[opsize]) SET(xCF);
+   else CLEAR(xCF);
    checkSubOverflow((dword)op1, op2, (dword)result);
    setEflags(result, opsize);
    checkAuxCarry((dword)op1, (dword)op2, (dword)result);
@@ -1093,9 +1090,9 @@ dword sub(qword op1, dword op2) {
 
 dword sbb(qword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) - (op2 & mask) - C;
-   if (result & CARRY_BITS[opsize]) SET(CF);
-   else CLEAR(CF);
+   qword result = (op1 & mask) - (op2 & mask) - xC;
+   if (result & CARRY_BITS[opsize]) SET(xCF);
+   else CLEAR(xCF);
    checkSubOverflow((dword)op1, op2, (dword)result);
    setEflags(result, opsize);
    checkAuxCarry((dword)op1, (dword)op2, (dword)result);
@@ -1105,7 +1102,7 @@ dword sbb(qword op1, dword op2) {
 dword AND(dword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
    dword result = (op1 & mask) & (op2 & mask);
-   CLEAR(CF | OF);
+   CLEAR(xCF | xOF);
    setEflags(result, opsize);
    return result & mask;
 }
@@ -1113,7 +1110,7 @@ dword AND(dword op1, dword op2) {
 dword OR(dword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
    dword result = (op1 & mask) | (op2 & mask);
-   CLEAR(CF | OF);
+   CLEAR(xCF | xOF);
    setEflags(result, opsize);
    return result & mask;
 }
@@ -1121,7 +1118,7 @@ dword OR(dword op1, dword op2) {
 dword XOR(dword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
    dword result = (op1 & mask) ^ (op2 & mask);
-   CLEAR(CF | OF);
+   CLEAR(xCF | xOF);
    setEflags(result, opsize);
    return result & mask;
 }
@@ -1129,32 +1126,32 @@ dword XOR(dword op1, dword op2) {
 void cmp(qword op1, dword op2) {
    dword mask = SIZE_MASKS[opsize];
    qword result = (op1 & mask) - (op2 & mask);
-   if (result & CARRY_BITS[opsize]) SET(CF);
-   else CLEAR(CF);
+   if (result & CARRY_BITS[opsize]) SET(xCF);
+   else CLEAR(xCF);
    checkSubOverflow((dword)op1, op2, (dword)result);
    setEflags(result, opsize);
 }
 
 dword inc(qword op1) {
-   dword oldCarry = C;
+   dword oldCarry = xC;
    op1 = add(op1, 1);
-   CLEAR(CF);
+   CLEAR(xCF);
    cpu.eflags |= oldCarry;
    return (dword) op1;
 }
 
 dword dec(qword op1) {
-   dword oldCarry = C;
+   dword oldCarry = xC;
    op1 = sub(op1, 1);
-   CLEAR(CF);
+   CLEAR(xCF);
    cpu.eflags |= oldCarry;
    return (dword) op1;
 }
 
 void checkLeftOverflow(dword result, byte size) {
    dword msb = result & SIGN_BITS[size];
-   if ((msb && C) || (!msb && NC)) CLEAR(OF);
-   else SET(OF);
+   if ((msb && xC) || (!msb && xNC)) CLEAR(xOF);
+   else SET(xOF);
 }
 
 dword rol(qword op, byte amt) {
@@ -1163,8 +1160,8 @@ dword rol(qword op, byte amt) {
    if (amt) {
       op = op & SIZE_MASKS[opsize];
       op = (op >> (BITS[opsize] - amt)) | (op << amt);
-      if (op & 1) SET(CF);
-      else CLEAR(CF);
+      if (op & 1) SET(xCF);
+      else CLEAR(xCF);
       if (amt == 1) {
          checkLeftOverflow((dword)op, opsize);
       }
@@ -1178,13 +1175,13 @@ dword ror(qword op, byte amt) {
    if (amt) {
       op = op & SIZE_MASKS[opsize];
       op = (op << (BITS[opsize] - amt)) | (op >> amt);
-      if (op & SIGN_BITS[opsize]) SET(CF);
-      else CLEAR(CF);
+      if (op & SIGN_BITS[opsize]) SET(xCF);
+      else CLEAR(xCF);
       if (amt == 1) {
          dword shift = (dword)op << 1;
          shift = (shift ^ (dword)op) & SIGN_BITS[opsize];
-         if (shift) SET(OF);
-         else CLEAR(OF);
+         if (shift) SET(xOF);
+         else CLEAR(xOF);
       }
    }
    return (dword) op & SIZE_MASKS[opsize];
@@ -1196,15 +1193,15 @@ dword rcl(qword op, byte amt) {
    //remove unnecessary rotations
    amt = amt % (ROTATE_SIZE_MASKS[opsize] + 2);
    if (amt) {
-      if (C) op |= CARRY_BITS[opsize];  //setup current carry
+      if (xC) op |= CARRY_BITS[opsize];  //setup current carry
       else op &= ~CARRY_BITS[opsize];
       for (int i = amt; i; i--) {
          qword temp = op & CARRY_BITS[opsize]; //get current carry
          op <<= 1;
          if (temp) op |= 1; //feed carry back in right and
       }
-      if (op & CARRY_BITS[opsize]) SET(CF);  //set final carry
-      else CLEAR(CF);
+      if (op & CARRY_BITS[opsize]) SET(xCF);  //set final carry
+      else CLEAR(xCF);
       if (amt == 1) {
          checkLeftOverflow((dword)op, opsize);
       }
@@ -1215,7 +1212,7 @@ dword rcl(qword op, byte amt) {
 //probably could do this faster with bit shifts but I am not
 //that concerned with speed
 dword rcr(qword op, byte amt) {
-   int temp = C; //get initial carry
+   int temp = xC; //get initial carry
    //remove unnecessary rotations
    amt = amt % (ROTATE_SIZE_MASKS[opsize] + 2);
    if (amt) {
@@ -1225,13 +1222,13 @@ dword rcr(qword op, byte amt) {
          temp = (int)op & 1; //get next carry
          op >>= 1;
       }
-      if (temp) SET(CF);  //set final carry
-      else CLEAR(CF);
+      if (temp) SET(xCF);  //set final carry
+      else CLEAR(xCF);
       if (amt == 1) {
          dword shift = (dword)op << 1;
          shift = (shift ^ (dword)op) & SIGN_BITS[opsize];
-         if (shift) SET(OF);
-         else CLEAR(OF);
+         if (shift) SET(xOF);
+         else CLEAR(xOF);
       }
    }
    return (dword) op & SIZE_MASKS[opsize];
@@ -1243,8 +1240,8 @@ dword shl(qword op, byte amt) {
          checkLeftOverflow((dword)op, opsize);
       }
       op <<= amt;
-      if (op & CARRY_BITS[opsize]) SET(CF);
-      else CLEAR(CF);
+      if (op & CARRY_BITS[opsize]) SET(xCF);
+      else CLEAR(xCF);
       setEflags(op, opsize);  //flags only affected when amt != 0
    }
    return (dword) op & SIZE_MASKS[opsize];
@@ -1254,8 +1251,8 @@ dword shl(qword op, byte amt) {
 dword shiftRight(qword op, byte amt) {
    if (amt) {
       dword final_carry = 1 << (amt - 1);
-      if (op & final_carry) SET(CF);
-      else CLEAR(CF);
+      if (op & final_carry) SET(xCF);
+      else CLEAR(xCF);
       op >>= amt;
       setEflags(op, opsize);  //flags only affected when amt != 0
    }
@@ -1264,8 +1261,8 @@ dword shiftRight(qword op, byte amt) {
 
 dword shr(qword op, byte amt) {
    if (amt == 1) {
-      if (op & SIGN_BITS[opsize]) SET(OF);
-      else CLEAR(OF);
+      if (op & SIGN_BITS[opsize]) SET(xOF);
+      else CLEAR(xOF);
    }
    return shiftRight(op & SIZE_MASKS[opsize], amt);
 }
@@ -1284,7 +1281,7 @@ dword sar(qword op, byte amt) {
          break;
    }
    if (amt == 1) {
-      CLEAR(OF);
+      CLEAR(xOF);
    }
    return shiftRight(op, amt);
 }
@@ -1292,8 +1289,8 @@ dword sar(qword op, byte amt) {
 dword shrd(qword op1, qword bits, byte amt) {
    if (amt) {
       dword newCarry = 1 << (amt - 1);
-      if (op1 & newCarry) SET(CF);
-      else CLEAR(CF);
+      if (op1 & newCarry) SET(xCF);
+      else CLEAR(xCF);
       bits <<= (BITS[opsize] - amt);
       op1 = ((op1 & SIZE_MASKS[opsize]) >> amt) | bits;
       setEflags(op1, opsize);
@@ -1304,8 +1301,8 @@ dword shrd(qword op1, qword bits, byte amt) {
 dword shld(qword op1, qword bits, byte amt) {
    if (amt) {
       dword newCarry = 1 << (BITS[opsize] - amt);
-      if (op1 & newCarry) SET(CF);
-      else CLEAR(CF);
+      if (op1 & newCarry) SET(xCF);
+      else CLEAR(xCF);
       bits = (bits & SIZE_MASKS[opsize]) >> (BITS[opsize] - amt);
       op1 = (op1 << amt) | bits;
       setEflags(op1, opsize);
@@ -1336,31 +1333,30 @@ void dShift() {
 }
 
 unsigned int getLongShiftCount(AddrInfo *dest, AddrInfo *source) {
-   unsigned long long shift, s2 = 0;
+   ll_union shift, s2;
+   s2.ll = 0;
    if (source->type == TYPE_REG) {
       if (prefix & PREFIX_SIZE) {
-         shift = sse2.xmm.ll[source->addr][0];
-         s2 = sse2.xmm.ll[source->addr][1];
+         shift.ll = sse2.xmm.ll[source->addr][0];
+         s2.ll = sse2.xmm.ll[source->addr][1];
       }
       else {
-         shift = fpu.r[dest->addr].ll;
+         shift.ll = fpu.r[dest->addr].ll;
       }
    }
    else {
-      unsigned int *ip = (unsigned int*)&shift;
-      ip[0] = (unsigned int)readMem(source->addr, SIZE_DWORD);
-      ip[1] = (unsigned int)readMem(source->addr + 4, SIZE_DWORD);
+      shift.low = (unsigned int)readMem(source->addr, SIZE_DWORD);
+      shift.high = (unsigned int)readMem(source->addr + 4, SIZE_DWORD);
       if (prefix & PREFIX_SIZE) {
-         ip = (unsigned int*)&s2;
-         ip[0] = (unsigned int)readMem(source->addr + 8, SIZE_DWORD);
-         ip[1] = (unsigned int)readMem(source->addr + 12, SIZE_DWORD);
+         s2.low = (unsigned int)readMem(source->addr + 8, SIZE_DWORD);
+         s2.high = (unsigned int)readMem(source->addr + 12, SIZE_DWORD);
       }
    }
-   if (shift > 256 || s2 != 0) {
+   if (shift.ll > 256 || s2.ll != 0) {
       return 256;   //exceeds any legal shift count
    }
    else {
-      return (unsigned int)shift;
+      return shift.low;
    }
 }
 
@@ -1495,21 +1491,21 @@ int doTwo() {
             return 0;
          case 7: { //DAA
             dword al = eax & 0xFF;
-            if (((al & 0x0F) > 9) || (cpu.eflags & AF)) {
+            if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
                dword old_al = al;
-               SET(AF);
+               SET(xAF);
                al += 6;
-               if (C || ((al ^ old_al) & 0x10)) SET(CF);
+               if (xC || ((al ^ old_al) & 0x10)) SET(xCF);
             }
             else {
-               CLEAR(AF);
+               CLEAR(xAF);
             }
-            if (((al & 0xF0) > 0x90) || C) {
+            if (((al & 0xF0) > 0x90) || xC) {
                al += 0x60;
-               SET(CF);
+               SET(xCF);
             }
             else {
-               CLEAR(CF);
+               CLEAR(xCF);
             }
             eax = (eax & 0xFFFFFF00) | (al & 0xFF);
             setEflags(eax, SIZE_BYTE);
@@ -1520,21 +1516,21 @@ int doTwo() {
             return 0;
          case 0xF: { //DAS
             dword al = eax & 0xFF;
-            if (((al & 0x0F) > 9) || (cpu.eflags & AF)) {
+            if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
                dword old_al = al;
-               SET(AF);
+               SET(xAF);
                al -= 6;
-               if (C || ((al ^ old_al) & 0x10)) SET(CF);
+               if (xC || ((al ^ old_al) & 0x10)) SET(xCF);
             }
             else {
-               CLEAR(AF);
+               CLEAR(xAF);
             }
-            if (((al & 0xFF) > 0x9F) || C) {
+            if (((al & 0xFF) > 0x9F) || xC) {
                al -= 0x60;
-               SET(CF);
+               SET(xCF);
             }
             else {
-               CLEAR(CF);
+               CLEAR(xCF);
             }
             eax = (eax & 0xFFFFFF00) | (al & 0xFF);
             setEflags(eax, SIZE_BYTE);
@@ -1567,13 +1563,13 @@ int doThree() {
          case 7: {//AAA
             dword al = eax & 0xFF;
             dword ax = eax & 0xFF00;
-            if (((al & 0x0F) > 9) || (cpu.eflags & AF)) {
-               SET(CF | AF);
+            if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
+               SET(xCF | xAF);
                ax += 0x100;
                al += 6;
             }
             else {
-               CLEAR(CF | AF);
+               CLEAR(xCF | xAF);
             }
             ax |= al;
             eax = (eax & 0xFFFF0000) | (ax & 0xFF0F);
@@ -1585,13 +1581,13 @@ int doThree() {
          case 0xF: {//AAS
             dword al = eax & 0xFF;
             dword ax = eax & 0xFF00;
-            if (((al & 0x0F) > 9) || (cpu.eflags & AF)) {
-               SET(CF | AF);
+            if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
+               SET(xCF | xAF);
                ax = (ax - 0x100) & 0xFF00;
                al -= 6;
             }
             else {
-               CLEAR(CF | AF);
+               CLEAR(xCF | xAF);
             }
             ax |= al;
             eax = (eax & 0xFFFF0000) | (ax & 0xFF0F);
@@ -1639,11 +1635,11 @@ int doFive() {
 }
 
 void stepd(byte size) {
-   D ? (edi -= size) : (edi += size);
+   xD ? (edi -= size) : (edi += size);
 }
 
 void steps(byte size) {
-   D ? (esi -= size) : (esi += size);
+   xD ? (esi -= size) : (esi += size);
 }
 
 void step(byte size) {
@@ -1765,52 +1761,52 @@ int doSeven() {
    int branch = 0;
    switch (op) {
       case 0: //JO
-         branch = O;
+         branch = xO;
          break;
       case 1: //JNO
-         branch = NO;
+         branch = xNO;
          break;
       case 2: //B/NAE/C
-         branch = B;
+         branch = xB;
          break;
       case 3: //NB/AE/NC
-         branch = NB;
+         branch = xNB;
          break;
       case 4:  //E/Z
-         branch = Z;
+         branch = xZ;
          break;
       case 5:  //NE/NZ
-         branch = NZ;
+         branch = xNZ;
          break;
       case 6:  //BE/NA
-         branch = BE;
+         branch = xBE;
          break;
       case 7:  //NBE/A
-         branch = A;
+         branch = xA;
          break;
       case 8: //S
-         branch = S;
+         branch = xS;
          break;
       case 9: //NS
-         branch = NS;
+         branch = xNS;
          break;
       case 0xA: //P/PE
-         branch = P;
+         branch = xP;
          break;
       case 0xB: //NP/PO
-         branch = NP;
+         branch = xNP;
          break;
       case 0xC: //L/NGE
-         branch = L;
+         branch = xL;
          break;
       case 0xD: //NL/GE
-         branch = GE;
+         branch = xGE;
          break;
       case 0xE: //LE/NG
-         branch = LE;
+         branch = xLE;
          break;
       case 0xF: //NLE/G
-         branch = G;
+         branch = xG;
          break;
    }
    if (branch) {
@@ -2019,8 +2015,8 @@ int doTen() {
                cmp(val, readMem(edi, opsize));
                step(opsize);
                ecx--;        //FAILS to take addr size into account
-               if (rep && NZ) break;
-               if (repne && Z) break;
+               if (rep && xNZ) break;
+               if (repne && xZ) break;
             }
          }
          else {
@@ -2088,8 +2084,8 @@ int doTen() {
                cmp(eax, readMem(edi, opsize));
                stepd(opsize);
                ecx--;        //FAILS to take addr size into account
-               if (rep && NZ) break;
-               if (repne && Z) break;
+               if (rep && xNZ) break;
+               if (repne && xZ) break;
             }
          }
          else {
@@ -2306,7 +2302,7 @@ int doThirteen() {
       }
       case 6: //undocumented SALC
          eax = eax & ~SIZE_MASKS[SIZE_BYTE];
-         if (C) eax |= 0xFF;
+         if (xC) eax |= 0xFF;
          break;
       case 7: //XLAT/XLATB
          break;
@@ -3152,7 +3148,7 @@ int doFourteen() {
    if (op < 4) {
       disp = fetch(SIZE_BYTE);
       if (op < 3) { //LOOPNE/LOOPNZ, LOOPE/LOOPZ, LOOP
-         cond = op == 2 ? 1 : op == 0 ? NZ : Z;
+         cond = op == 2 ? 1 : op == 0 ? xNZ : xZ;
          dest.addr = ECX;
          dest.type = TYPE_REG;
          storeOperand(&dest, getOperand(&dest) - 1);
@@ -3227,8 +3223,8 @@ int doFifteen() {
             case 3: //NEG
                temp = getOperand(&dest);
                storeOperand(&dest, sub(0, (dword)temp));
-               if (temp) SET(CF);
-               else CLEAR(CF);
+               if (temp) SET(xCF);
+               else CLEAR(xCF);
                break;
             case 4: case 5: //MUL: IMUL: (CF/OF incorrect for IMUL
                source.addr = dest.addr;
@@ -3248,8 +3244,8 @@ int doFifteen() {
                   temp >>= opsize == SIZE_WORD ? 16 : 32;
                   storeOperand(&dest, (dword)temp);
                }
-               if (temp) SET(CF | OF);
-               else CLEAR(CF | OF);
+               if (temp) SET(xCF | xOF);
+               else CLEAR(xCF | xOF);
                break;
             case 6: case 7: //DIV: IDIV: (does this work for IDIV?)
                source.addr = dest.addr;
@@ -3325,25 +3321,25 @@ int doFifteen() {
          case 4:  //HLT
             break;
          case 5:  //CMC
-            cpu.eflags ^= CF;
+            cpu.eflags ^= xCF;
             break;
          case 8: //CLC
-            CLEAR(CF);
+            CLEAR(xCF);
             break;
          case 9: //STC
-            SET(CF);
+            SET(xCF);
             break;
          case 0xA: //CLI
-            CLEAR(IF);
+            CLEAR(xIF);
             break;
          case 0xB: //STI
-            SET(IF);
+            SET(xIF);
             break;
          case 0xC: //CLD
-            CLEAR(DF);
+            CLEAR(xDF);
             break;
          case 0xD: //STD
-            SET(DF);
+            SET(xDF);
             break;
       }
    }
@@ -3356,52 +3352,52 @@ int doSet(byte cc) {
    opsize = SIZE_BYTE;
    switch (cc) {
       case 0: //SO
-         set = O;
+         set = xO;
          break;
       case 1: //SNO
-         set = NO;
+         set = xNO;
          break;
       case 2: //B/NAE/C
-         set = B;
+         set = xB;
          break;
       case 3: //NB/AE/NC
-         set = NB;
+         set = xNB;
          break;
       case 4:  //E/Z
-         set = Z;
+         set = xZ;
          break;
       case 5:  //NE/NZ
-         set = NZ;
+         set = xNZ;
          break;
       case 6:  //BE/NA
-         set = BE;
+         set = xBE;
          break;
       case 7:  //NBE/A
-         set = A;
+         set = xA;
          break;
       case 8: //S
-         set = S;
+         set = xS;
          break;
       case 9: //NS
-         set = NS;
+         set = xNS;
          break;
       case 0xA: //P/PE
-         set = P;
+         set = xP;
          break;
       case 0xB: //NP/PO
-         set = NP;
+         set = xNP;
          break;
       case 0xC: //L/NGE
-         set = L;
+         set = xL;
          break;
       case 0xD: //NL/GE
-         set = GE;
+         set = xGE;
          break;
       case 0xE: //LE/NG
-         set = LE;
+         set = xLE;
          break;
       case 0xF: //NLE/G
-         set = G;
+         set = xG;
          break;
    }
    storeOperand(&dest, set ? 1 : 0);
@@ -3420,7 +3416,7 @@ dword doBitComplement(dword val, int mask) {
    return val ^= mask;
 }
 
-dword doBitTest(dword val, int mask) {
+dword doBitTest(dword val, int /*mask*/) {
    return val;
 }
 
@@ -3441,8 +3437,8 @@ void doBitOp(dword (*bitop)(dword, int)) {
    }
    result = getOperand(&dest);
    bitpos = 1 << bitpos;
-   if (result & bitpos) SET(CF);
-   else CLEAR(CF);
+   if (result & bitpos) SET(xCF);
+   else CLEAR(xCF);
    storeOperand(&dest, (*bitop)(result, bitpos));
 //   msg("bitop complete\n");
 }
@@ -3462,8 +3458,8 @@ void doBitOpGrp8() {
    }
    result = getOperand(&dest);
    bitpos = 1 << bitpos;
-   if (result & bitpos) SET(CF);
-   else CLEAR(CF);
+   if (result & bitpos) SET(xCF);
+   else CLEAR(xCF);
    switch (source.addr) {
    case 4:
       break;
@@ -3671,60 +3667,60 @@ int doEscape() {
          break;
       case 3: //
          if (lower == 1) { //RDTSC
-            edx = (dword) (tsc >> 32);
-            eax = (dword) tsc;
+            edx = (dword) tsc.high;
+            eax = (dword) tsc.low;
          }
          break;
       case 4: { //CMOVcc
          int doMove = 0;
          switch (lower) {
             case 0:      //CMOVO
-               doMove = O;
+               doMove = xO;
                break;
             case 1:      //CMOVNO
-               doMove = NO;
+               doMove = xNO;
                break;
             case 2:      //CMOVB, CMOVC, CMOVNAE
-               doMove = B;
+               doMove = xB;
                break;
             case 3:      //CMOVAE, CMOVNB, CMOVNC
-               doMove = NB;
+               doMove = xNB;
                break;
             case 4:      //CMOVE, CMOVZ
-               doMove = Z;
+               doMove = xZ;
                break;
             case 5:      //CMOVNE, CMOVNZ
-               doMove = NZ;
+               doMove = xNZ;
                break;
             case 6:      //CMOVBE, CMOVNA
-               doMove = BE;
+               doMove = xBE;
                break;
             case 7:      //CMOVA, CMOVNBE
-               doMove = A;
+               doMove = xA;
                break;
             case 8:      //CMOVS
-               doMove = S;
+               doMove = xS;
                break;
             case 9:      //CMOVNS
-               doMove = NS;
+               doMove = xNS;
                break;
             case 0xA:      //CMOVP, CMOVPE
-               doMove = P;
+               doMove = xP;
                break;
             case 0xB:      //CMOVNP, CMOVPO
-               doMove = NP;
+               doMove = xNP;
                break;
             case 0xC:      //CMOVL, CMOVNGE
-               doMove = L;
+               doMove = xL;
                break;
             case 0xD:      //CMOVGE, CMOVNL
-               doMove = GE;
+               doMove = xGE;
                break;
             case 0xE:      //CMOVLE, CMOVNG
-               doMove = LE;
+               doMove = xLE;
                break;
             case 0xF:      //CMOVG, CMOVNLE
-               doMove = G;
+               doMove = xG;
                break;
          }
          if (doMove) {
@@ -4250,7 +4246,7 @@ int doEscape() {
             case 0xC: {   //PUNPCKLQDQ
                if (prefix & PREFIX_SIZE) {
                   fetchOperands(&dest, &source);
-                  unsigned long long *d = &sse2.xmm.ll[dest.addr][0];
+//                  unsigned long long *d = &sse2.xmm.ll[dest.addr][0];
                   if (source.type == TYPE_REG) {
                      sse2.xmm.ll[dest.addr][1] = sse2.xmm.ll[source.addr][0];
                   }
@@ -4696,10 +4692,10 @@ int doEscape() {
                fetchOperands(&dest, &source);
                int src = getOperand(&source);
                if (src == 0) {
-                  SET(ZF);
+                  SET(xZF);
                }
                else {
-                  CLEAR(ZF);
+                  CLEAR(xZF);
                   dword result = 0;
                   for (int i = 0; i < BITS[opsize]; i++) {
                      if (src & 1) {
@@ -4716,10 +4712,10 @@ int doEscape() {
                fetchOperands(&dest, &source);
                int src = getOperand(&source);
                if (src == 0) {
-                  SET(ZF);
+                  SET(xZF);
                }
                else {
-                  CLEAR(ZF);
+                  CLEAR(xZF);
                   dword result = BITS[opsize] - 1;
                   for (int i = 0; i < BITS[opsize]; i++) {
                      if (src & SIGN_BITS[opsize]) {
@@ -4734,7 +4730,7 @@ int doEscape() {
             }
          }
          break;
-      case 0xC:  //C8-CF BSWAP
+      case 0xC:  //C8-xCF BSWAP
          if (lower >= 8) {
             result = cpu.general[opcode & 0x7];
             cpu.general[opcode & 0x7] = (result << 24) | ((result << 8) & 0xFF0000) |
@@ -4765,7 +4761,7 @@ int doEscape() {
                   opsize = SIZE_WORD;
                   unsigned char idx = fetchu(SIZE_BYTE);
                   unsigned short *d;
-                  if (dest.type = TYPE_REG) {
+                  if (dest.type == TYPE_REG) {
                      if (prefix & PREFIX_SIZE) {
                         d = &sse2.xmm.w[dest.addr][0];
                         idx &= 7;
@@ -4774,8 +4770,9 @@ int doEscape() {
                         d = fpu.r[dest.addr].s;
                         idx &= 3;
                      }
+                     d[idx] = getOperand(&source);
                   }
-                  d[idx] = getOperand(&source);
+//                  d[idx] = getOperand(&source);   //???
                   break;
                }
                case 5: {   //PEXTRW
@@ -4873,7 +4870,7 @@ int doEscape() {
             case 4: {   //PADDQ
                fetchOperands(&dest, &source);
                unsigned long long v;
-               unsigned int *vp = (unsigned int*)&v;
+//               unsigned int *vp = (unsigned int*)&v;
                if (source.type != TYPE_REG) {   //memory source, use at least 64 bits
                   readBuffer(source.addr, &v, 8);
                }
@@ -5722,7 +5719,7 @@ int doEscape() {
             case 0xB: {   //PSUBQ
                fetchOperands(&dest, &source);
                unsigned long long v;
-               unsigned int *vp = (unsigned int*)&v;
+//               unsigned int *vp = (unsigned int*)&v;
                if (source.type != TYPE_REG) {   //memory source, use at least 64 bits
                   readBuffer(source.addr, &v, 8);
                }
@@ -5849,7 +5846,7 @@ static operand_func table_0[16] = {
 
 int executeInstruction() {
    int done = 0;
-   int doTrap = cpu.eflags & TF;
+   int doTrap = cpu.eflags & xTF;
    dest.addr = source.addr = prefix = 0;
    opsize = SIZE_DWORD;  //default
    segmentBase = csBase;
@@ -5887,9 +5884,9 @@ int executeInstruction() {
          done = (*table_0[(opcode >> 4) & 0x0F])();
       }
    }
-   tsc += 5;
+   tsc.ll += 5;
    if (doTrap) {  //trace flag set
-      cpu.eflags &= ~TF;   //clear TRAP flag
+      cpu.eflags &= ~xTF;   //clear TRAP flag
       initiateInterrupt(1, cpu.eip);
    }
 //msg("x86emu: end instruction, eip: 0x%x\n", eip);

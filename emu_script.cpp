@@ -1,6 +1,6 @@
 /*
    Scripting support for the x86 emulator IdaPro plugin
-   Copyright (c) 2008 Chris Eagle
+   Copyright (c) 2008-2010 Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -42,7 +42,7 @@ void setIdcRegister(dword idc_reg_num, dword newVal);
 /*
  * native implementation of EmuRun.
  */
-static error_t idaapi idc_emu_run(idc_value_t *argv, idc_value_t *res) {
+static error_t idaapi idc_emu_run(idc_value_t * /*argv*/, idc_value_t * /*res*/) {
    run();
    return eOk;
 }
@@ -50,7 +50,7 @@ static error_t idaapi idc_emu_run(idc_value_t *argv, idc_value_t *res) {
 /*
  * native implementation of EmuStepOne.
  */
-static error_t idaapi idc_emu_step(idc_value_t *argv, idc_value_t *res) {
+static error_t idaapi idc_emu_step(idc_value_t * /*argv*/, idc_value_t * /*res*/) {
    stepOne();
    return eOk;
 }
@@ -58,7 +58,7 @@ static error_t idaapi idc_emu_step(idc_value_t *argv, idc_value_t *res) {
 /*
  * native implementation of EmuTraceOne.
  */
-static error_t idaapi idc_emu_trace_one(idc_value_t *argv, idc_value_t *res) {
+static error_t idaapi idc_emu_trace_one(idc_value_t * /*argv*/, idc_value_t * /*res*/) {
    traceOne();
    return eOk;
 }
@@ -66,7 +66,7 @@ static error_t idaapi idc_emu_trace_one(idc_value_t *argv, idc_value_t *res) {
 /*
  * native implementation of EmuTrace.
  */
-static error_t idaapi idc_emu_trace(idc_value_t *argv, idc_value_t *res) {
+static error_t idaapi idc_emu_trace(idc_value_t * /*argv*/, idc_value_t * /*res*/) {
    trace();
    return eOk;
 }
@@ -74,7 +74,7 @@ static error_t idaapi idc_emu_trace(idc_value_t *argv, idc_value_t *res) {
 /*
  * native implementation of EmuSync.
  */
-static error_t idaapi idc_emu_sync(idc_value_t *argv, idc_value_t *res) {
+static error_t idaapi idc_emu_sync(idc_value_t * /*argv*/, idc_value_t * /*res*/) {
    emuSyncDisplay();
    return eOk;
 }
@@ -168,7 +168,7 @@ static error_t idaapi idc_emu_setreg(idc_value_t *argv, idc_value_t *res) {
  */
 void register_funcs() {
    static const char idc_void[] = { 0 };
-   static const char idc_str_args[] = { VT_STR, 0 };
+//   static const char idc_str_args[] = { VT_STR, 0 };
    static const char idc_long[] = { VT_LONG, 0 };
    static const char idc_long_long[] = { VT_LONG, VT_LONG, 0 };
    set_idc_func("EmuRun", idc_emu_run, idc_void);

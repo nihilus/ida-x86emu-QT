@@ -1,7 +1,7 @@
 /*
    Source for x86 emulator IdaPro plugin
    File: memmgr.cpp
-   Copyright (c) 2004, Chris Eagle
+   Copyright (c) 2004-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -120,7 +120,7 @@ void MemMgr::reserve(dword addr, dword size) {
    }
 }
 
-dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *name) {
+dword MemMgr::mmap(dword addr, dword size, dword /*prot*/, dword /*flags*/, const char *name) {
    if (addr == 0) {
       addr = inf.minEA;
    }
@@ -139,7 +139,7 @@ dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *
             dword suffix = (addr >> 12) & 0xFFFFF;
             if (name == NULL) {
                char segName[64];
-               qsnprintf(segName, sizeof(segName), "mmap_%05x", suffix);
+               ::qsnprintf(segName, sizeof(segName), "mmap_%05x", suffix);
                createNewSegment(segName, addr, size);
             }
             else {

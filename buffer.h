@@ -1,7 +1,7 @@
 /*
    Source for x86 emulator IdaPro plugin
    File: buffer.h
-   Copyright (c) 2005,2006 Chris Eagle
+   Copyright (c) 2005-2010 Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -47,7 +47,7 @@ public:
    unsigned int getVersion();
 
 private:
-   Buffer(const Buffer &b) {};
+   Buffer(const Buffer & /*b*/) {};
    int check_size(unsigned int max);
    void init(unsigned int size);
    

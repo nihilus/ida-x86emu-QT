@@ -1,7 +1,7 @@
 /*
    Source for x86 emulator IdaPro plugin
    File: emuheap.cpp
-   Copyright (c) 2004, Chris Eagle
+   Copyright (c) 2004-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -294,7 +294,7 @@ bool EmuHeap::checkHeapSize(unsigned int newsize) {
    }
    if (newsize > size) {
       //need to grow our heap segment
-      segment_t *h = getseg(base);
+//      segment_t *h = getseg(base);
       unsigned int newend = (newsize + 0xFFF) & ~0xFFF;  //round up to 4k boundary
       set_segm_end(base, base + newend, 0);
    }
@@ -361,7 +361,7 @@ unsigned int HeapBase::addHeap(unsigned int maxSize, unsigned int base) {
          count++;
       }
       if (p) {
-         qsnprintf(buf, 16, ".heap%d", count);
+         ::qsnprintf(buf, 16, ".heap%d", count);
          MemMgr::mmap(p->max, 0x1000, 0, 0, buf);
          //really need to check maxSize + max here against 0xFFFFFFFF
          p->nextHeap = new EmuHeap(p->max, 0x1000, maxSize);
@@ -423,7 +423,7 @@ void readLegacyHeap(int heapNum, Buffer &bIn, Buffer &bOut, unsigned int num_blo
    }
    else {
       char buf[16];
-      qsnprintf(buf, 16, ".heap%d", heapNum);
+      ::qsnprintf(buf, 16, ".heap%d", heapNum);
       MemMgr::mmap(base, 0x1000, 0, 0, buf);
    }
    for (unsigned int i = 0; i < num_blocks; i++) {

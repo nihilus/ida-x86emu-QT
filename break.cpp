@@ -1,7 +1,7 @@
 /*
    break.cpp
    Breakpoint implementation for IdaPro x86 emulator
-   Copyright (c) 2004, Chris Eagle
+   Copyright (c) 2004-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -41,17 +41,13 @@ void addBreakpoint(unsigned int addr) {
       size += 10;
    }
    bp_list[count++] = addr;
-#if (IDA_SDK_VERSION >= 461)
    set_item_color(addr, COLOR_RED);
-#endif
 }
 
 void removeBreakpoint(unsigned int addr) {
    for (unsigned int i = 0; i < count; i++) {
       if (bp_list[i] == addr) {
-#if (IDA_SDK_VERSION >= 461)
          set_item_color(addr, COLOR_WHITE);
-#endif
          bp_list[i] = bp_list[--count];
          break;
       }

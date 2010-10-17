@@ -1,6 +1,6 @@
 /*
    Source for x86 emulator IdaPro plugin
-   Copyright (c) 2005, 2006 Chris Eagle
+   Copyright (c) 2005-2010 Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -29,8 +29,12 @@
 #endif
 #endif
 
+#ifdef __NT__
 #include <windows.h>
 #include <winnt.h>
+#else
+#include "image.h"
+#endif
 
 #ifdef PACKED
 #undef PACKED
@@ -78,22 +82,22 @@ void applyPEHeaderTemplates(unsigned int mz_addr) {
    tid_t ish = import_type(ti, -1, "IMAGE_SECTION_HEADER");
 #endif
    
-   doStruct(mz_addr, sizeof(IMAGE_DOS_HEADER), idh);
+   doStruct(mz_addr, sizeof(_IMAGE_DOS_HEADER), idh);
    unsigned short e_lfanew = get_word(mz_addr + 0x3C);
    mz_addr += e_lfanew;
 
-   if (doStruct(mz_addr, sizeof(IMAGE_NT_HEADERS), inth) == 0) {
+   if (doStruct(mz_addr, sizeof(_IMAGE_NT_HEADERS), inth) == 0) {
       do_unknown(mz_addr, 0);
       set_cmt(mz_addr - e_lfanew, "!!Warning, MZ Header overlaps PE header!!", 0);
-      doStruct(mz_addr, sizeof(IMAGE_NT_HEADERS), inth);
+      doStruct(mz_addr, sizeof(_IMAGE_NT_HEADERS), inth);
    }
 
    unsigned short num_sects = get_word(mz_addr + 6);
 
-   mz_addr += sizeof(IMAGE_NT_HEADERS);
+   mz_addr += sizeof(_IMAGE_NT_HEADERS);
    
    for (unsigned short i = 0; i < num_sects; i++) {
-      doStruct(mz_addr + i * sizeof(IMAGE_SECTION_HEADER), sizeof(IMAGE_SECTION_HEADER), ish);
+      doStruct(mz_addr + i * sizeof(_IMAGE_SECTION_HEADER), sizeof(_IMAGE_SECTION_HEADER), ish);
    }
 }
 
@@ -128,7 +132,7 @@ void createSegment(unsigned int start, unsigned int size, unsigned char *content
 PETables::PETables() {
    valid = 0;
    base = 0;
-   nt = (IMAGE_NT_HEADERS*)malloc(sizeof(IMAGE_NT_HEADERS));
+   nt = (_IMAGE_NT_HEADERS*)malloc(sizeof(_IMAGE_NT_HEADERS));
    sections = NULL;
    num_sections = 0;
    imports = NULL;
@@ -173,16 +177,16 @@ unsigned int PETables::rvaToFileOffset(unsigned int rva) {
 */
 }
 
-void PETables::setNtHeaders(IMAGE_NT_HEADERS *inth) {
-   memcpy(nt, inth, sizeof(IMAGE_NT_HEADERS));
+void PETables::setNtHeaders(_IMAGE_NT_HEADERS *inth) {
+   memcpy(nt, inth, sizeof(_IMAGE_NT_HEADERS));
    base = nt->OptionalHeader.ImageBase;
 }
 
-void PETables::setSectionHeaders(unsigned int nsecs, IMAGE_SECTION_HEADER *ish) {
+void PETables::setSectionHeaders(unsigned int nsecs, _IMAGE_SECTION_HEADER *ish) {
    num_sections = nsecs;
-   sections = (IMAGE_SECTION_HEADER*)malloc(num_sections * sizeof(IMAGE_SECTION_HEADER));
+   sections = (_IMAGE_SECTION_HEADER*)malloc(num_sections * sizeof(_IMAGE_SECTION_HEADER));
    if (sections == NULL) return;
-   memcpy(sections, ish, num_sections * sizeof(IMAGE_SECTION_HEADER));
+   memcpy(sections, ish, num_sections * sizeof(_IMAGE_SECTION_HEADER));
    //bss type segments are zero filled by operating system loader
    for (unsigned short i = 0; i < num_sections; i++) {
       if (sections[i].SizeOfRawData < sections[i].Misc.VirtualSize) {
@@ -207,11 +211,11 @@ void PETables::setSectionHeaders(unsigned int nsecs, IMAGE_SECTION_HEADER *ish) 
 void PETables::buildThunks(FILE *f) {
    unsigned int import_rva, min_rva = 0xFFFFFFFF, max_rva = 0;
    unsigned int min_iat = 0xFFFFFFFF, max_iat = 0;
-   IMAGE_IMPORT_DESCRIPTOR desc;
+   _IMAGE_IMPORT_DESCRIPTOR desc;
 
    import_rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
    if (import_rva) {
-      msg("import_rva = %x, image_base = %x\n", import_rva, nt->OptionalHeader.ImageBase);
+      msg("import_rva = %x, image_base = %x\n", import_rva, (unsigned int)nt->OptionalHeader.ImageBase);
       import_rva = rvaToFileOffset(import_rva);
       imports = NULL;
 
@@ -302,7 +306,9 @@ void PETables::buildThunks(FILE *f) {
             }
 //            tr->names[i] = stringFromFile(f);
             char *n = stringFromFile(f);
+#ifdef DEBUG
             msg("read import name %s\n", n);
+#endif
             if (name_rva < min_rva) min_rva = name_rva;
             if (name_rva > max_rva) max_rva = name_rva + strlen(n) + 1;
             free(n);

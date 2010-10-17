@@ -1,7 +1,7 @@
 /*
    Source for x86 emulator IdaPro plugin
    File: hooklist.h
-   Copyright (c) 2004, Chris Eagle
+   Copyright (c) 2004-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -21,7 +21,6 @@
 #ifndef __HOOK_LIST_H
 #define __HOOK_LIST_H
 
-#include <stdio.h>
 #include "buffer.h"
 
 typedef void (*hookfunc)(unsigned int addr);

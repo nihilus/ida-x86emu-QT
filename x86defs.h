@@ -1,6 +1,6 @@
 /*
    Headers for x86 emulator
-   Copyright (c) 2003, Chris Eagle
+   Copyright (c) 2003-2010, Chris Eagle
    
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
@@ -49,18 +49,51 @@ typedef unsigned char  uchar;
 
 #else   //#ifdef __IDP__
 
+#ifndef NO_OBSOLETE_FUNCS
+#define NO_OBSOLETE_FUNCS
+#endif
+
+#ifndef USE_DANGEROUS_FUNCTIONS
+#define USE_DANGEROUS_FUNCTIONS
+#endif  // USE_DANGEROUS_FUNCTIONS
+
+#ifndef USE_STANDARD_FILE_FUNCTIONS
+#define USE_STANDARD_FILE_FUNCTIONS
+#endif
+
+#ifndef __NT__
+#define _strdup strdup
+#endif
+
+#define PLUGIN_NAME "x86emu"
+
+#ifdef __QT__
+#ifndef QT_NAMESPACE
+#define QT_NAMESPACE QT
+#endif
+#endif
+
+/*
 #ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
 #endif  // USE_DANGEROUS_FUNCTIONS
 #endif  //_MSC_VER
 
+#ifndef _MSC_VER
+#ifndef USE_STANDARD_FILE_FUNCTIONS
+#define USE_STANDARD_FILE_FUNCTIONS 1
+#endif
+#endif
+*/
+
 #include <ida.hpp>
 #include <idp.hpp>
 #include <bytes.hpp>
+#include <netnode.hpp>
 
-typedef __int64 quad;
-typedef unsigned __int64 uquad;
+typedef long long quad;
+typedef unsigned long long uquad;
 
 typedef unsigned char u_int8_t;
 typedef unsigned short u_int16_t;
@@ -69,6 +102,8 @@ typedef int int32_t;
 
 #include "sdk_versions.h"
 
+extern netnode x86emu_node;
+
 #endif
 
 typedef uchar  byte;
@@ -76,76 +111,84 @@ typedef ushort word;
 typedef uint   dword;
 typedef uquad  qword;
 
-#define CARRY 0x1
-#define PARITY 0x4
-#define AUX_CARRY 0x10
-#define ZERO  0x40
-#define SIGN 0x80
-#define TRAP 0x100
-#define INTERRUPT 0x200
-#define DIRECTION 0x400
-#define OVERFLOW 0x800
+union ll_union {
+   unsigned long long ll;
+   struct {
+      unsigned int low;
+      unsigned int high;
+   };
+};
 
-#define CF CARRY
-#define PF PARITY
-#define AF AUX_CARRY
-#define ZF ZERO
-#define SF SIGN
-#define TF TRAP
-#define IF INTERRUPT
-#define DF DIRECTION
-#define OF OVERFLOW
+#define xCARRY 0x1
+#define xPARITY 0x4
+#define xAUX_CARRY 0x10
+#define xZERO  0x40
+#define xSIGN 0x80
+#define xTRAP 0x100
+#define xINTERRUPT 0x200
+#define xDIRECTION 0x400
+#define xOVERFLOW 0x800
+
+#define xCF xCARRY
+#define xPF xPARITY
+#define xAF xAUX_CARRY
+#define xZF xZERO
+#define xSF xSIGN
+#define xTF xTRAP
+#define xIF xINTERRUPT
+#define xDF xDIRECTION
+#define xOF xOVERFLOW
 
 #define RESERVED_FLAGS 0xFFC0802A
-#define RING_3_FLAGS (CF | PF | AF | ZF | SF | OF | DF | TF)
+#define RING_3_FLAGS (xCF | xPF | xAF | xZF | xSF | xOF | xDF | xTF)
 #define RING_0_FLAGS (0xFFFFFFFF & ~RESERVED_FLAGS)
 
-#define D (cpu.eflags & DF)
+#define xD (cpu.eflags & xDF)
 
 #define SET(x) (cpu.eflags |= (x))
 #define CLEAR(x) (cpu.eflags &= (~x))
 
-#define O (cpu.eflags & OF)
-#define NO (!(cpu.eflags & OF))
+#define xO (cpu.eflags & xOF)
+#define xNO (!(cpu.eflags & xOF))
 
-#define B (cpu.eflags & CF)
-#define C B
-#define NAE B
-#define NB (!(cpu.eflags & CF))
-#define AE NB
-#define NC NB
+#define xB (cpu.eflags & xCF)
+#define xC xB
+#define xNAE xB
+#define xNB (!(cpu.eflags & xCF))
+#define xAE xNB
+#define xNC xNB
 
-#define E (cpu.eflags & ZF)
-#define Z E
-#define NE (!(cpu.eflags & ZF))
-#define NZ NE
+#define xE (cpu.eflags & xZF)
+#define xZ xE
+#define xNE (!(cpu.eflags & xZF))
+#define xNZ xNE
 
-#define BE (cpu.eflags & (ZF | CF))
-#define NA BE
-#define NBE (!(cpu.eflags & (ZF | CF)))
-#define A NBE
+#define xBE (cpu.eflags & (xZF | xCF))
+#define xNA xBE
+#define xNBE (!(cpu.eflags & (xZF | xCF)))
+#define xA xNBE
 
-#define S (cpu.eflags & SF)
-#define NS (!(cpu.eflags & SF))
+#define xS (cpu.eflags & xSF)
+#define xNS (!(cpu.eflags & xSF))
 
-#define P (cpu.eflags & PF)
-#define PE P
-#define NP (!(cpu.eflags & PF))
-#define PO NP
+#define xP (cpu.eflags & xPF)
+#define xPE xP
+#define xNP (!(cpu.eflags & xPF))
+#define xPO xNP
 
-#define L (((cpu.eflags & (SF | OF)) == SF) || \
-          ((cpu.eflags & (SF | OF)) == OF))
-#define NGE L
-#define NL (((cpu.eflags & (SF | OF)) == 0) || \
-           ((cpu.eflags & (SF | OF)) == (SF | OF)))
-#define GE NL
+#define xL (((cpu.eflags & (xSF | xOF)) == xSF) || \
+           ((cpu.eflags & (xSF | xOF)) == xOF))
+#define xNGE xL
+#define xNL (((cpu.eflags & (xSF | xOF)) == 0) || \
+            ((cpu.eflags & (xSF | xOF)) == (xSF | xOF)))
+#define xGE xNL
 
-#define LE (((cpu.eflags & (SF | OF)) == SF) || \
-           ((cpu.eflags & (SF | OF)) == OF)  || Z)
-#define NG LE
-#define NLE ((((cpu.eflags & (SF | OF)) == 0) || \
-            ((cpu.eflags & (SF | OF)) == (SF | OF))) && NZ)
-#define G NLE
+#define xLE (((cpu.eflags & (xSF | xOF)) == xSF) || \
+            ((cpu.eflags & (xSF | xOF)) == xOF)  || xZ)
+#define xNG xLE
+#define xNLE ((((cpu.eflags & (xSF | xOF)) == 0) || \
+             ((cpu.eflags & (xSF | xOF)) == (xSF | xOF))) && xNZ)
+#define xG xNLE
 
 #define H_MASK 0x0000FF00
 
@@ -157,6 +200,11 @@ typedef uquad  qword;
 #define EBP 5
 #define ESI 6
 #define EDI 7
+#define EIP 8
+#define EFLAGS 9
+
+#define MIN_REG 0
+#define MAX_REG 9
 
 #define eax (cpu.general[EAX])
 #define ecx (cpu.general[ECX])
@@ -347,6 +395,65 @@ extern unsigned int randVal;
 #define SYSTEM_TIME_HIGH 14
 //this would be a kernel32 variable pointing into the heap
 #define EMU_COMMAND_LINE 15
+
+//various supvals
+#define SYS_DLL_DIR 100
+#define LAST_DIR 101
+#endif
+
+//callback type for function argument list generator
+typedef void (*argcallback_t)(const char *func, const char *arg, int idx, void *user);
+
+void getRandomBytes(void *buf, unsigned int len);
+void traceLog(char *entry);
+void closeTrace();
+void openTraceFile();
+void setTitle();
+void updateRegister(int r, dword val);
+void forceCode();
+void codeCheck(void);
+dword parseNumber(char *numb);
+void dumpRange();
+bool isStringPointer(char *type_str);
+void skip();
+void grabStackBlock();
+void grabHeapBlock();
+void grabMmapBlock();
+void stepOne();
+void syncDisplay();
+void emuSyncDisplay();
+void traceOne();
+void run();
+unsigned int *getRegisterPointer(int reg);
+unsigned int getRegisterValue(int reg);
+void setRegisterValue(int reg, unsigned int val);
+void pushData();
+void dumpRange(dword low, dword hi);
+void dumpEmbededPE();
+void switchThread(int tidx);
+void destroyThread(int tidx);
+void memLoadFile(dword start);
+void dumpHeap();
+void doReset();
+void jumpToCursor();
+void runToCursor();
+void setTracking(bool track);
+bool getTracking();
+void setTracing(bool trace);
+bool getTracing();
+void tagImportAddressSavePoint();
+void setBreakpoint();
+void clearBreakpoint();
+void generateMemoryException();
+void doExportLookup();
+void generateArgList(const char *func, argcallback_t cb, void *user);
+
+#ifdef __NT__
+#define DIR_SEP '\\'
+#define aDIR_SEP "\\"
+#else
+#define DIR_SEP '/'
+#define aDIR_SEP "/"
 #endif
 
 #endif

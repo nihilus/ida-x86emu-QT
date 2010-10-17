@@ -23,7 +23,7 @@ CFLAGS=-Wextra $(PLATFORM_CFLAGS)
 LDFLAGS=-Wl -shared -s $(PLATFORM_LDFLAGS) 
 
 #specify any additional libraries that you may need
-EXTRALIBS=-lcomdlg32 -lgdi32 -luser32 -lpsapi -ladvapi32
+EXTRALIBS=-lcomdlg32 -lgdi32 -luser32 -ladvapi32
 RESOURCES=dialog.res
 
 # Destination directory for compiled plugins
@@ -31,6 +31,7 @@ OUTDIR=$(SDKROOT)bin/plugins/
 
 #list out the object files in your project here
 OBJS=	$(F)x86emu.o \
+   $(F)x86emu_ui.o \
 	$(F)emufuncs.o \
 	$(F)cpu.o \
 	$(F)emuheap.o \
@@ -73,7 +74,10 @@ $(BINARY): $(OBJS)
 #change x86emu below to the name of your plugin, make sure to add any 
 #additional files that your plugin is dependent on
 
-x86emu.o: x86emu.cpp break.h emufuncs.h emuthreads.h cpu.h resource.h \
+x86emu.o: x86emu.cpp x86emu_ui.h break.h emufuncs.h emuthreads.h cpu.h resource.h \
+	x86defs.h emuheap.h seh.h hooklist.h peutils.h elf32.h elf_common.h
+
+x86emu_ui.o: x86emu_ui.cpp x86emu_ui.h break.h emufuncs.h emuthreads.h cpu.h resource.h \
 	x86defs.h emuheap.h seh.h hooklist.h peutils.h elf32.h elf_common.h
 
 emufuncs.o: emufuncs.cpp emufuncs.h hooklist.h cpu.h emuheap.h \
