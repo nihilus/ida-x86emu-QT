@@ -1034,10 +1034,12 @@ void X86Dialog::segments() {
    segs.exec();
 }
 
-X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent) {
-//   QSizePolicy pol(QSizePolicy::Fixed, QSizePolicy::Fixed);
-//   setSizePolicy(pol);
-   
+#define X86_WINDOW_FLAGS Qt::CustomizeWindowHint | \
+                         Qt::WindowTitleHint | \
+                         Qt::WindowMinimizeButtonHint | \
+                         Qt::WindowCloseButtonHint | \
+                         Qt::Tool
+X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {   
    QAction *fileDump_embedded_PEAction = new QAction("Dump embedded PE", this);
    QAction *fileCloseAction = new QAction("Close", this);
    QAction *editStackAction = new QAction("Stack", this);
