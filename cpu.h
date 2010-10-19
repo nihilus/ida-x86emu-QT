@@ -97,8 +97,6 @@ extern dword importSavePoint;
 
 extern dword shouldBreak;
 
-extern dword imageTop;
-
 typedef struct _IntrRecord_t {
    bool hasError;
    struct _IntrRecord_t *next;

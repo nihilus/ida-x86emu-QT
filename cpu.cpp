@@ -323,6 +323,7 @@ int saveState(netnode &f) {
       HeapBase::getHeap()->save(b);
    }
    else {
+      //new style heaps are saved into a dedicated netnode
       Buffer hb;
       netnode hn("$ X86emu Heap");
       HeapBase::getHeap()->save(hb);
@@ -343,11 +344,6 @@ int saveState(netnode &f) {
       }      
    }
 
-/* VERSION(0)
-   saveHookList(b);
-   saveModuleList(b);
-*/
-   //>= VERSION(1)
    saveHookList(b);
    saveModuleList(b);
 
@@ -368,7 +364,7 @@ int saveState(netnode &f) {
       tn->save(b, activeThread->handle != tn->handle);
    }
 
-   saveVEHState(b);
+//   saveVEHState(b);
 
    if (!b.has_error()) {
    //
@@ -406,34 +402,8 @@ int saveState(netnode &f) {
    }
 }
 
-void createLegacyStack(Buffer &b) {
-   unsigned int sp, top, allocated, sz, x;
-   char ch;
-   b.read((char*)&sp, sizeof(sp));
-   b.read((char*)&top, sizeof(top));
-   b.read((char*)&x, sizeof(x));
-   b.read((char*)&x, sizeof(x));
-   b.read((char*)&allocated, sizeof(allocated));
-   sz = top - sp;
-   if (sz > 0x1000) {
-      sz += 0xFFF;
-      sz &= ~0xFFF;
-   }
-   else {
-      sz = 0x1000;
-   }
-   MemMgr::mmap(top - sz, sz, 0, 0, ".stack");
-   sz = top - sp;
-   top--;
-   for (unsigned int i = 0; i < sz; i++, top--) {
-      b.read(&ch, 1);
-      patch_byte(top, ch);
-   }
-}
-
 int loadState(netnode &f) {
    unsigned char *buf = NULL;
-   unsigned int peek;
    size_t sz;
    int personality = f.altval(HEAP_PERSONALITY);
    // Fetch the blob attached to the node.
@@ -463,35 +433,10 @@ int loadState(netnode &f) {
    b.read((char*)&tsc, sizeof(tsc));
    b.read((char*)&importSavePoint, sizeof(importSavePoint));
 
-   //test to see if this is old format
-   b.read((char*)&peek, sizeof(peek));
-   b.rewind(4);   //back it up
-
    if (personality == 0) {
-      if (peek < 0x10000) {
-         //small number indicates this is probably the number of heaps
-         //which is indicative of new format
-         EmuHeap::loadHeapLayout(b);
-      }
-      else {
-         //try to parse old MemoryManager format
-         unsigned int x;
-         b.read((char*)&x, sizeof(x));  //skip 2 ints
-         b.read((char*)&x, sizeof(x));
-         //stack info is next
-         //read stack info
-         segment_t *s = get_segm_by_name(".stack");
-         if (s == NULL) { //it should since this appears to be old style
-            createLegacyStack(b);
-         }
-         //heap info is next
-         //read heap info
-         s = get_segm_by_name(".heap");
-         if (s == NULL) { //it should since this appears to be old style
-            createLegacyHeap(b);
-         }
-      }
+      EmuHeap::loadHeapLayout(b);
    }
+
    loadHookList(b);
    loadModuleList(b);
 
@@ -513,46 +458,35 @@ int loadState(netnode &f) {
 
    //now load additional thread data and set active thread
 
-   dword bytesRemaining = b.get_wlen() - b.get_rlen();
-   if (bytesRemaining >= 12) {  //three fields for threads are present
-      dword threadMagic, threadCount, active;
-      b.read((char*)&threadMagic, sizeof(threadMagic));
-      if (threadMagic == THREAD_MAGIC) {
-         b.read((char*)&active, sizeof(active));
-         b.read((char*)&threadCount, sizeof(threadCount));
-         //now load thread list
-         ThreadNode *tn = NULL;
-         for (dword i = 0; i < threadCount; i++) {
-            if (i == 0) {
-               threadList = new ThreadNode(b, active);
-               tn = threadList;
-            }
-            else {
-               tn->next = new ThreadNode(b, active);
-               tn = tn->next;
-            }
-            if (tn->handle == active) {
-               activeThread = tn;
-            }
+   dword threadMagic, threadCount, active;
+   b.read((char*)&threadMagic, sizeof(threadMagic));
+   if (threadMagic == THREAD_MAGIC) {
+      b.read((char*)&active, sizeof(active));
+      b.read((char*)&threadCount, sizeof(threadCount));
+      //now load thread list
+      ThreadNode *tn = NULL;
+      for (dword i = 0; i < threadCount; i++) {
+         if (i == 0) {
+            threadList = new ThreadNode(b, active);
+            tn = threadList;
          }
+         else {
+            tn->next = new ThreadNode(b, active);
+            tn = tn->next;
+         }
+         if (tn->handle == active) {
+            activeThread = tn;
+         }
+      }
 /*
-         for (tn = threadList; tn; tn = tn->next) {
-            msg("Thread: %x\n", tn->handle);
-         }
-         msg("x86emu: active: %x, active->handle: %x\n", activeThread, activeThread ? activeThread->handle : 0);
+      for (tn = threadList; tn; tn = tn->next) {
+         msg("Thread: %x\n", tn->handle);
+      }
+      msg("x86emu: active: %x, active->handle: %x\n", activeThread, activeThread ? activeThread->handle : 0);
 */
-         msg("x86emu: loaded %d threads from saved state\n", threadCount);
-         
-         loadVEHState(b);
-      }
-      else {
-         //something wrong THREAD_MAGIC expected
-      }
-   }
-   else {
-      //old saved state with no thread info, initialize active thread
-      threadList = activeThread = new ThreadNode();
-      msg("x86emu: auto initialized active thread\n");
+      msg("x86emu: loaded %d threads from saved state\n", threadCount);
+      
+//      loadVEHState(b);
    }
 
    if (!b.has_error() && cpu.idtr.base == 0) {

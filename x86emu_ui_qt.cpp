@@ -22,7 +22,8 @@
  *
  *  It is known to compile with
  *
- *  - Visual C++ 6.0, Visual Studio 2005, cygwin g++/make
+ *  - Qt Version: Windows - Visual Studio 2008, Linux/OS X - g++
+ *  - Windows only version (IDA < 6.0): Visual C++ 6.0, Visual Studio 2005, MinGW g++/make
  *
  */
 
@@ -37,6 +38,8 @@
 #endif
 
 #include <QtGui/QMessageBox>
+#include <QtGui/QToolBar>
+#include <QtGui/QButtonGroup>
 
 #include "x86emu_ui_qt.h"
 
@@ -451,9 +454,13 @@ MemConfigDialog::MemConfigDialog(QWidget *parent) : QDialog(parent) {
    setModal(true);
 
    heap_base = new QLineEdit();
+   heap_base->setValidator(&aiv);
    heap_size = new QLineEdit();
+   heap_size->setValidator(&aiv);
    stack_top = new QLineEdit();
+   stack_top->setValidator(&aiv);
    stack_size = new QLineEdit();
+   stack_size->setValidator(&aiv);
 
    char buf[16];
    segment_t *s = get_segm_by_name(".stack");
@@ -616,6 +623,7 @@ SetMemoryDialog::SetMemoryDialog(QWidget *parent) : QDialog(parent) {
    char buf[32];
    ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)get_screen_ea());
    mem_start = new QLineEdit(buf);
+   mem_start->setValidator(&aiv);
    mem_values = new QLineEdit(this);
 
    address->setBuddy(mem_start);
@@ -707,7 +715,9 @@ MmapDialog::MmapDialog(QWidget *parent) : QDialog(parent) {
 
 //   SendDlgItemMessage(hwndDlg, IDC_MMAP_SIZE, WM_SETFONT, (WPARAM)fixed, FALSE);
    mmap_base = new QLineEdit("0");
+   mmap_base->setValidator(&aiv);
    mmap_size = new QLineEdit("0x1000");
+   mmap_size->setValidator(&aiv);
    
    textLabel1->setBuddy(mmap_base);
    textLabel2->setBuddy(mmap_size);
@@ -1040,8 +1050,9 @@ void X86Dialog::segments() {
                          Qt::WindowCloseButtonHint | \
                          Qt::Tool
 X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {   
+   QAction *fileDumpAction = new QAction("Dump", this);
    QAction *fileDump_embedded_PEAction = new QAction("Dump embedded PE", this);
-   QAction *fileCloseAction = new QAction("Close", this);
+   QAction *fileCloseAction = new QAction("Close", this);   
    QAction *editStackAction = new QAction("Stack", this);
    QAction *editSegment_registersAction = new QAction("Segment registers...", this);
    QAction *viewEnumerate_heapAction = new QAction("Enumerate heap", this);
@@ -1064,7 +1075,6 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    QAction *functionsAllocate_heap_blockAction = new QAction("Allocate heap block...", this);
    QAction *functionsAllocate_stack_blockAction = new QAction("Allocate stack block...", this);
    QAction *functionsAllocate_mmap_blockAction = new QAction("Allocate mmap block...", this);
-   QAction *fileDumpAction = new QAction("Dump", this);
 
    QEAX = new QLineEdit();
    QEAX->setValidator(&aiv);
@@ -1169,15 +1179,18 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    
    setCentralWidget(central);
 
-   QMenuBar *MAIN_MENU = new QMenuBar(this);
-   QMenu *File = new QMenu("File", MAIN_MENU);
-   QMenu *Edit = new QMenu("Edit", MAIN_MENU);
-   QMenu *View = new QMenu("View", MAIN_MENU);
-   QMenu *Emulate = new QMenu("Emulate", MAIN_MENU);
-   QMenu *popupMenu_13 = new QMenu("Windows", Emulate);
+   QToolBar *toolBar = new QToolBar();
+   toolBar->setMovable(false);
+
+   QMenu *File = new QMenu("File", this);
+   QMenu *Edit = new QMenu("Edit", this);
+   QMenu *View = new QMenu("View", this);
+   QMenu *Emulate = new QMenu("Emulate", this);
+   QMenu *popupMenu_13 = new QMenu("Windows", this);
    QMenu *popupMenu_16 = new QMenu("Throw exception", popupMenu_13);
-   QMenu *Functions = new QMenu("Functions", MAIN_MENU);
-   setMenuBar(MAIN_MENU);
+   QMenu *Functions = new QMenu("Functions", this);
+
+   addToolBar(toolBar);
       
    setTabOrder(QEAX, QEBX);
    setTabOrder(QEBX, QECX);
@@ -1196,16 +1209,18 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    setTabOrder(RUN, SEGMENTS);
    setTabOrder(SEGMENTS, SET_MEMORY);
    setTabOrder(SET_MEMORY, PUSH_DATA);
-   
-   MAIN_MENU->addAction(File->menuAction());
-   MAIN_MENU->addAction(Edit->menuAction());
-   MAIN_MENU->addAction(View->menuAction());
-   MAIN_MENU->addAction(Emulate->menuAction());
-   MAIN_MENU->addAction(Functions->menuAction());
+
+   toolBar->addAction(File->menuAction());
+   toolBar->addAction(Edit->menuAction());
+   toolBar->addAction(View->menuAction());
+   toolBar->addAction(Emulate->menuAction());
+   toolBar->addAction(Functions->menuAction());
+
    File->addAction(fileDumpAction);
    File->addAction(fileDump_embedded_PEAction);
    File->addSeparator();
    File->addAction(fileCloseAction);
+
    Edit->addAction(editStackAction);
    Edit->addAction(editSegment_registersAction);
    View->addAction(viewEnumerate_heapAction);
@@ -1248,6 +1263,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    connect(QESI, SIGNAL(editingFinished()), this, SLOT(changeEsi()));
    connect(QESP, SIGNAL(editingFinished()), this, SLOT(changeEsp()));
    connect(QEBP, SIGNAL(editingFinished()), this, SLOT(changeEbp()));
+
    connect(fileDumpAction, SIGNAL(triggered()), this, SLOT(dumpRange()));
    connect(fileDump_embedded_PEAction, SIGNAL(triggered()), this, SLOT(dumpEmbededPE()));
    connect(fileCloseAction, SIGNAL(triggered()), this, SLOT(hideEmu()));

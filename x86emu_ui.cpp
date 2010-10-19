@@ -22,7 +22,8 @@
  *
  *  It is known to compile with
  *
- *  - Visual C++ 6.0, Visual Studio 2005, cygwin g++/make
+ *  - Qt Version: Windows - Visual Studio 2008, Linux/OS X - g++
+ *  - Windows only version (IDA < 6.0): Visual C++ 6.0, Visual Studio 2005, MinGW g++/make
  *
  */
 

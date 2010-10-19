@@ -639,7 +639,9 @@ int getSystemDllDirectory(char *dir, int size) {
          saveDllDir(dir);
       }
    }
+#ifdef DEBUG
    msg(PLUGIN_NAME": setting system dll directory to %s\n", dir);
+#endif
    return len;
 }
 
@@ -687,7 +689,9 @@ HandleList *addModule(const char *mod, bool loading, int id) {
                   if (end) {
                      *end = 0;
                      savelastDir(module_name);
+#ifdef DEBUG
                      msg(PLUGIN_NAME": saved directory %s\n", module_name);
+#endif
                   }
                }
                else {

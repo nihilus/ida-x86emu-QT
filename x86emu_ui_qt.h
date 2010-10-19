@@ -31,8 +31,6 @@
 #include <QtGui/QListWidget>
 #include <QtGui/QLineEdit>
 #include <QtGui/QComboBox>
-#include <QtGui/QCheckBox>
-#include <QtGui/QButtonGroup>
 #include <QtGui/QMainWindow>
 #include <QtGui/QRadioButton>
 #include <QtGui/QValidator>

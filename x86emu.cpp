@@ -22,7 +22,8 @@
  *
  *  It is known to compile with
  *
- *  - Visual C++ 6.0, Visual Studio 2005, cygwin g++/make
+ *  - Qt Version: Windows - Visual Studio 2008, Linux/OS X - g++
+ *  - Windows only version (IDA < 6.0): Visual C++ 6.0, Visual Studio 2005, MinGW g++/make
  *
  */
 
@@ -134,9 +135,6 @@ static netnode heap_node(heap_node_name);
 IMAGE_NT_HEADERS nt;
 dword peImageBase;
 
-//highest address used by this image
-dword imageTop;
-
 //set to true if saved emulator state is found
 bool cpuInit = false;
 
@@ -159,6 +157,7 @@ FILE *traceFile = NULL;
 bool doTrack = false;
 
 bool hooked = false;
+bool uiHooked = false;
 
 //Fixed for Windows XP at the moment
 dword OSMajorVersion = 5;
@@ -842,6 +841,9 @@ static int idaapi uiCallback(void * /*cookie*/, int code, va_list /*va*/) {
       // The user is saving the database.  Save the plug-in
       // state with it.
       //
+#ifdef DEBUG
+      msg(PLUGIN_NAME": ui_saving notification\n");
+#endif      
       Buffer *b = new Buffer();
       x86emu_node.create(x86emu_node_name);
       if (saveState(x86emu_node) == X86EMUSAVE_OK) {
@@ -878,6 +880,62 @@ static int idaapi uiCallback(void * /*cookie*/, int code, va_list /*va*/) {
    }
    return 0;
 }
+
+#define DOS_MAGIC 0x5A4D   //"MZ"
+
+void setPEimageBase() {
+   netnode pe_node("$ PE header");
+   peImageBase = pe_node.altval(0xFFFFFFFE);
+   
+   if (peImageBase == 0) {
+      //could not find $ PE header
+      segment_t *h = getnseg(0);   //peek at first segment
+      dword addr = h->startEA;
+      if (get_word(addr) == DOS_MAGIC) {
+         peImageBase = addr;
+      }
+   }
+}   
+
+//
+// Called by IDA to notify the plug-in of certain UI events.
+// At the moment this is only used to catch the "saving" event
+// so that the plug-in can save its state in the database.
+//
+static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
+   switch (code) {
+   case processor_t::newfile: {
+      //
+      // a new database has been opened
+      //
+#ifdef DEBUG
+      msg(PLUGIN_NAME": newfile notification\n");
+#endif      
+      if (inf.filetype == f_PE) {
+         setPEimageBase();
+         //there has got to be a better way to choose til 
+         //or detect what is already loaded
+         init_til("mssdk.til");
+      }      
+      else if (inf.filetype == f_ELF) {
+         //there has got to be a better way to choose til 
+         //or detect what is already loaded
+         init_til("gnuunx.til");
+      }      
+   
+      register_funcs();
+//      break;
+   }
+   case processor_t::oldfile: {
+      unhook_from_notification_point(HT_IDP, idpCallback, NULL);
+      break;
+   }
+   default:
+      break;
+   }
+   return 0;
+}
+
 
 void dumpHeap() {
    const MallocNode *n = HeapBase::getHeap()->heapHead();
@@ -1027,22 +1085,6 @@ FILE *LoadHeadersCommon(dword addr, segment_t &s, bool createSeg = true) {
    return f;
 }
 
-#define DOS_MAGIC 0x5A4D   //"MZ"
-
-void setPEimageBase() {
-   netnode pe_node("$ PE header");
-   peImageBase = pe_node.altval(0xFFFFFFFE);
-   
-   if (peImageBase == 0) {
-      //could not find $ PE header
-      segment_t *h = getnseg(0);   //peek at first segment
-      dword addr = h->startEA;
-      if (get_word(addr) == DOS_MAGIC) {
-         peImageBase = addr;
-      }
-   }
-}   
-
 void loadResources(FILE *f) {
    IMAGE_SECTION_HEADER *sh = (IMAGE_SECTION_HEADER*)pe.sections;
    for (int i = 0; i < pe.num_sections; i++) {
@@ -1083,7 +1125,9 @@ dword PELoadHeaders() {
    else {
       addr = peImageBase;
    }
-      
+#ifdef DEBUG
+   msg(PLUGIN_NAME": peImageBase set to 0x%08x\n", peImageBase);
+#endif      
    segment_t s;
    if (get_word(addr) == DOS_MAGIC) {
       peImageBase = addr;
@@ -1640,7 +1684,7 @@ int idaapi init(void) {
    if (strcmp(inf.procName, "metapc")) return PLUGIN_SKIP;
 //   if ( ph.id != PLFM_386 ) return PLUGIN_SKIP;
 
-   imageTop = inf.maxEA;
+   hook_to_notification_point(HT_IDP, idpCallback, NULL);
 
    resetCpu();
 
@@ -1750,6 +1794,7 @@ int idaapi init(void) {
 
    setUnemulatedCB(EmuUnemulatedCB);
 
+/*
    if (inf.filetype == f_PE) {
       setPEimageBase();
       //there has got to be a better way to choose til 
@@ -1763,7 +1808,7 @@ int idaapi init(void) {
    }      
 
    register_funcs();
-
+*/
    return PLUGIN_KEEP;
 }
 
@@ -1774,6 +1819,9 @@ int idaapi init(void) {
 //      This function won't be called in the case of emergency exits.
 
 void idaapi term(void) {
+#ifdef DEBUG
+   msg(PLUGIN_NAME": term entered\n");
+#endif   
    if (hProv) {
 #ifdef __NT__
       CryptReleaseContext(hProv, 0);
@@ -1783,6 +1831,7 @@ void idaapi term(void) {
    }
    unregister_funcs();
    unhook_from_notification_point(HT_UI, uiCallback, NULL);
+   uiHooked = false;
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
    if (hooked) {
       hooked = false;
@@ -1793,6 +1842,9 @@ void idaapi term(void) {
    closeTrace();
    doTrace = false;
    doTrack = false;
+#ifdef DEBUG
+   msg(PLUGIN_NAME": term exiting\n");
+#endif   
 }
 
 //--------------------------------------------------------------------------
@@ -1903,7 +1955,10 @@ void idaapi run(int /*arg*/) {
    if (isWindowCreated) {
       displayEmulatorWindow();
    }
-   hook_to_notification_point(HT_UI, uiCallback, NULL);
+   if (!uiHooked) {
+      uiHooked = true;
+      hook_to_notification_point(HT_UI, uiCallback, NULL);
+   }
 }
 
 //--------------------------------------------------------------------------
@@ -1938,7 +1993,7 @@ char wanted_hotkey[] = "Alt-F8";
 
 plugin_t PLUGIN = {
   IDP_INTERFACE_VERSION,
-  0,                    // plugin flags
+  PLUGIN_PROC,                    // plugin flags
   init,                 // initialize
 
   term,                 // terminate. this pointer may be NULL.
