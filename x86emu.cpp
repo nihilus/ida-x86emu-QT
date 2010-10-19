@@ -168,6 +168,8 @@ extern til_t *ti;
 
 bool isWindowCreated = false;
 
+static int idaapi idpCallback(void * cookie, int code, va_list va);
+
 void getRandomBytes(void *buf, unsigned int len) {
 #ifdef __NT__
    if (hProv == 0) {
@@ -897,6 +899,26 @@ void setPEimageBase() {
    }
 }   
 
+static void loadBaseCommon() {
+   if (inf.filetype == f_PE) {
+      setPEimageBase();
+      //there has got to be a better way to choose til 
+      //or detect what is already loaded
+      init_til("mssdk.til");
+   }      
+   else if (inf.filetype == f_ELF) {
+      //there has got to be a better way to choose til 
+      //or detect what is already loaded
+      init_til("gnuunx.til");
+   }      
+
+   register_funcs();
+   
+   setUnemulatedCB(EmuUnemulatedCB);
+
+   unhook_from_notification_point(HT_IDP, idpCallback, NULL);
+}
+
 //
 // Called by IDA to notify the plug-in of certain UI events.
 // At the moment this is only used to catch the "saving" event
@@ -910,24 +932,116 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
       //
 #ifdef DEBUG
       msg(PLUGIN_NAME": newfile notification\n");
-#endif      
-      if (inf.filetype == f_PE) {
-         setPEimageBase();
-         //there has got to be a better way to choose til 
-         //or detect what is already loaded
-         init_til("mssdk.til");
-      }      
-      else if (inf.filetype == f_ELF) {
-         //there has got to be a better way to choose til 
-         //or detect what is already loaded
-         init_til("gnuunx.til");
-      }      
-   
-      register_funcs();
-//      break;
+#endif  
+      loadBaseCommon();
+      break;
    }
    case processor_t::oldfile: {
-      unhook_from_notification_point(HT_IDP, idpCallback, NULL);
+      if (netnode_exist(module_node)) {
+         // There's a module_node in the database.  Attempt to
+         // instantiate the module info list from it.
+         unsigned char *buf = NULL;
+         size_t sz;
+         msg("x86emu: Loading ModuleInfo state from existing netnode.\n");
+   
+         if ((buf = (unsigned char *)module_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
+            Buffer b(buf, sz);
+            loadModuleData(b);
+         }
+      }
+   
+      //
+      // See if there's a previous CPU state in this database that can
+      // be used.
+      //   
+      if (netnode_exist(x86emu_node)) {
+         //netnode should only exist if emulator was previously run
+         // There's an x86emu node in the database.  Attempt to
+         // instantiate the CPU state from it.
+         msg("x86emu: Loading x86emu state from existing netnode.\n");
+         dword loadStatus = loadState(x86emu_node);
+   
+         if (loadStatus == X86EMULOAD_OK) {
+            cpuInit = true;
+         }
+         else {
+            //probably shouldn't continue trying to init emulator at this point
+            msg("x86emu: Error restoring x86emu state: %d.\n", loadStatus);
+         }
+   
+         randVal = x86emu_node.altval(X86_RANDVAL);
+   
+         if (randVal == 0) {
+            do {
+               getRandomBytes(&randVal, 4);
+            } while (randVal == 0);
+            x86emu_node.altset(X86_RANDVAL, randVal);
+         }
+   
+         baseTime.dwLowDateTime = x86emu_node.altval(SYSTEM_TIME_LOW);
+         baseTime.dwHighDateTime = x86emu_node.altval(SYSTEM_TIME_HIGH);
+      }
+      else {
+         msg("x86emu: No saved x86emu state data was found.\n");
+      }
+      if (netnode_exist(heap_node)) {
+         // There's a heap_node in the database.  Attempt to
+         // instantiate the heap info from it.
+         unsigned char *buf = NULL;
+         size_t sz;
+         msg("x86emu: Loading HeapInfo state from existing netnode.\n");
+         Buffer *b = NULL;
+         if ((buf = (unsigned char *)heap_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
+            b = new Buffer(buf, sz);
+         }
+         unsigned int heap = x86emu_node.altval(HEAP_PERSONALITY);
+         switch (heap) {
+            case RTL_HEAP:
+               break;
+            case PHKMALLOC_HEAP:
+               break;
+            case JEMALLOC_HEAP:
+               break;
+            case DLMALLOC_2_7_2_HEAP:
+               break;
+            case LEGACY_HEAP:
+            default:
+               if (b) {
+                  EmuHeap::loadHeapLayout(*b);
+               }
+               break;
+         }
+         delete b;
+      }
+      if (netnode_exist(funcinfo_node)) {
+         // There's a funcinfo_node in the database.  Attempt to
+         // instantiate the function info list from it.
+         unsigned char *buf = NULL;
+         size_t sz;
+         msg("x86emu: Loading FunctionInfo state from existing netnode.\n");
+   
+         if ((buf = (unsigned char *)funcinfo_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
+            Buffer b(buf, sz);
+            loadFunctionInfo(b);
+         }
+      }
+      if (netnode_exist(petable_node)) {
+         // There's a petable_node in the database.  Attempt to
+         // instantiate the petable info list from it.
+         unsigned char *buf = NULL;
+         size_t sz;
+         msg("x86emu: Loading PETable state from existing netnode.\n");
+   
+         if ((buf = (unsigned char *)petable_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
+            Buffer b(buf, sz);
+            pe.loadTables(b);
+         }
+         if (!pe.valid) {
+            petable_node.kill();
+         }  
+      }
+      
+      loadBaseCommon();
       break;
    }
    default:
@@ -1678,137 +1792,14 @@ bool haveHeapSegment() {
 //      See the hook_to_notification_point() function.
 //
 int idaapi init(void) {
-   dword loadStatus;
    cpuInit = false;
    
    if (strcmp(inf.procName, "metapc")) return PLUGIN_SKIP;
-//   if ( ph.id != PLFM_386 ) return PLUGIN_SKIP;
 
    hook_to_notification_point(HT_IDP, idpCallback, NULL);
 
    resetCpu();
 
-   if (netnode_exist(module_node)) {
-      // There's a module_node in the database.  Attempt to
-      // instantiate the module info list from it.
-      unsigned char *buf = NULL;
-      size_t sz;
-      msg("x86emu: Loading ModuleInfo state from existing netnode.\n");
-
-      if ((buf = (unsigned char *)module_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
-         Buffer b(buf, sz);
-         loadModuleData(b);
-      }
-   }
-
-   //
-   // See if there's a previous CPU state in this database that can
-   // be used.
-   //   
-   if (netnode_exist(x86emu_node)) {
-      //netnode should only exist if emulator was previously run
-      // There's an x86emu node in the database.  Attempt to
-      // instantiate the CPU state from it.
-      msg("x86emu: Loading x86emu state from existing netnode.\n");
-      loadStatus = loadState(x86emu_node);
-
-      if (loadStatus == X86EMULOAD_OK) {
-         cpuInit = true;
-      }
-      else {
-         //probably shouldn't continue trying to init emulator at this point
-         msg("x86emu: Error restoring x86emu state: %d.\n", loadStatus);
-      }
-
-      randVal = x86emu_node.altval(X86_RANDVAL);
-
-      if (randVal == 0) {
-         do {
-            getRandomBytes(&randVal, 4);
-         } while (randVal == 0);
-         x86emu_node.altset(X86_RANDVAL, randVal);
-      }
-
-      baseTime.dwLowDateTime = x86emu_node.altval(SYSTEM_TIME_LOW);
-      baseTime.dwHighDateTime = x86emu_node.altval(SYSTEM_TIME_HIGH);
-   }
-   else {
-      msg("x86emu: No saved x86emu state data was found.\n");
-   }
-   if (netnode_exist(heap_node)) {
-      // There's a heap_node in the database.  Attempt to
-      // instantiate the heap info from it.
-      unsigned char *buf = NULL;
-      size_t sz;
-      msg("x86emu: Loading HeapInfo state from existing netnode.\n");
-      Buffer *b = NULL;
-      if ((buf = (unsigned char *)heap_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
-         b = new Buffer(buf, sz);
-      }
-      unsigned int heap = x86emu_node.altval(HEAP_PERSONALITY);
-      switch (heap) {
-         case RTL_HEAP:
-            break;
-         case PHKMALLOC_HEAP:
-            break;
-         case JEMALLOC_HEAP:
-            break;
-         case DLMALLOC_2_7_2_HEAP:
-            break;
-         case LEGACY_HEAP:
-         default:
-            if (b) {
-               EmuHeap::loadHeapLayout(*b);
-            }
-            break;
-      }
-      delete b;
-   }
-   if (netnode_exist(funcinfo_node)) {
-      // There's a funcinfo_node in the database.  Attempt to
-      // instantiate the function info list from it.
-      unsigned char *buf = NULL;
-      size_t sz;
-      msg("x86emu: Loading FunctionInfo state from existing netnode.\n");
-
-      if ((buf = (unsigned char *)funcinfo_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
-         Buffer b(buf, sz);
-         loadFunctionInfo(b);
-      }
-   }
-   if (netnode_exist(petable_node)) {
-      // There's a petable_node in the database.  Attempt to
-      // instantiate the petable info list from it.
-      unsigned char *buf = NULL;
-      size_t sz;
-      msg("x86emu: Loading PETable state from existing netnode.\n");
-
-      if ((buf = (unsigned char *)petable_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
-         Buffer b(buf, sz);
-         pe.loadTables(b);
-      }
-      if (!pe.valid) {
-         petable_node.kill();
-      }  
-   }
-
-   setUnemulatedCB(EmuUnemulatedCB);
-
-/*
-   if (inf.filetype == f_PE) {
-      setPEimageBase();
-      //there has got to be a better way to choose til 
-      //or detect what is already loaded
-      init_til("mssdk.til");
-   }      
-   else if (inf.filetype == f_ELF) {
-      //there has got to be a better way to choose til 
-      //or detect what is already loaded
-      init_til("gnuunx.til");
-   }      
-
-   register_funcs();
-*/
    return PLUGIN_KEEP;
 }
 
