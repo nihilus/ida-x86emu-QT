@@ -139,6 +139,10 @@ SOURCE=.\seh.cpp
 
 SOURCE=.\x86emu.cpp
 # End Source File
+# Begin Source File
+
+SOURCE=.\x86emu_ui.cpp
+# End Source File
 # End Group
 # Begin Group "Header Files"
 
@@ -206,6 +210,10 @@ SOURCE=.\seh.h
 # Begin Source File
 
 SOURCE=.\x86defs.h
+# End Source File
+# Begin Source File
+
+SOURCE=.\x86emu_ui.h
 # End Source File
 # End Group
 # Begin Group "Resource Files"
