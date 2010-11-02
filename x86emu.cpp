@@ -156,7 +156,8 @@ bool doTrace = false;
 FILE *traceFile = NULL;
 bool doTrack = false;
 
-bool hooked = false;
+bool idpHooked = false;
+bool idbHooked = false;
 bool uiHooked = false;
 
 //Fixed for Windows XP at the moment
@@ -916,7 +917,10 @@ static void loadBaseCommon() {
    
    setUnemulatedCB(EmuUnemulatedCB);
 
-   unhook_from_notification_point(HT_IDP, idpCallback, NULL);
+   if (idpHooked) {
+      idpHooked = false;
+      unhook_from_notification_point(HT_IDP, idpCallback, NULL);
+   }
 }
 
 //
@@ -1497,9 +1501,9 @@ void formatStack(dword begin, dword end) {
       begin += 4;
    }
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
-   if (!hooked) {
+   if (!idbHooked) {
       hook_to_notification_point(HT_IDB, idb_hook, NULL);
-      hooked = true;
+      idbHooked = true;
    }
 #endif
 }
@@ -1796,7 +1800,9 @@ int idaapi init(void) {
    
    if (strcmp(inf.procName, "metapc")) return PLUGIN_SKIP;
 
+   msg(PLUGIN_NAME": hooking idp\n");
    hook_to_notification_point(HT_IDP, idpCallback, NULL);
+   idpHooked = true;
 
    resetCpu();
 
@@ -1821,11 +1827,17 @@ void idaapi term(void) {
 #endif
    }
    unregister_funcs();
-   unhook_from_notification_point(HT_UI, uiCallback, NULL);
-   uiHooked = false;
+   if (uiHooked) {
+      unhook_from_notification_point(HT_UI, uiCallback, NULL);
+      uiHooked = false;
+   }
+   if (idpHooked) {
+      idpHooked = false;
+      unhook_from_notification_point(HT_IDP, idpCallback, NULL);
+   }   
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
-   if (hooked) {
-      hooked = false;
+   if (idbHooked) {
+      idbHooked = false;
       unhook_from_notification_point(HT_IDB, idb_hook, NULL);
    }
 #endif
