@@ -391,6 +391,19 @@ void forceCode() {
 //code and ask it to change the display as appropriate.
 void codeCheck(void) {
    ea_t loc = cpu.eip;
+   ea_t head = get_item_head(loc);
+   if (isUnknown(getFlags(loc))) {
+      forceCode(); //or ua_code(loc);
+   }
+   else if (loc != head) {
+      do_unknown(head, true); //undefine it
+      forceCode(); //or ua_code(loc);
+   }
+   else if (!isCode(getFlags(loc))) {
+      do_unknown(loc, true); //undefine it
+      forceCode(); //or ua_code(loc);
+   }
+/*
    int len1 = get_item_size(loc);
 #if IDA_SDK_VERSION >= 540
    int len2 = create_insn(loc);
@@ -409,6 +422,7 @@ void codeCheck(void) {
       do_unknown(loc, true); //undefine it
       forceCode();
    }
+*/
 }
 
 //update the specified register display with the specified 
@@ -1800,7 +1814,7 @@ int idaapi init(void) {
    
    if (strcmp(inf.procName, "metapc")) return PLUGIN_SKIP;
 
-   msg(PLUGIN_NAME": hooking idp\n");
+//   msg(PLUGIN_NAME": hooking idp\n");
    hook_to_notification_point(HT_IDP, idpCallback, NULL);
    idpHooked = true;
 
