@@ -55,6 +55,11 @@
 #include <typeinf.hpp>
 #include <segment.hpp>
 
+#if IDA_SDK_VERSION < 530
+#define SEGMOD_SILENT 0
+#define SEGMOD_KEEP 0
+#endif
+
 void addVectoredExceptionHandler(bool first, dword handler);
 void removeVectoredExceptionHandler(dword handler);
 
@@ -97,8 +102,6 @@ static dword moduleHandle = FAKE_HANDLE_BASE;
 static dword moduleId = 0x10000;
 
 static unemulatedCB unemulated_cb = NULL;
-
-static int syscallFlavor = SYSCALL_FLAVOR_LINUX;
 
 typedef enum {R_FAKE = -1, R_NO = 0, R_YES = 1} Reply;
 
@@ -2823,25 +2826,54 @@ void init_til(const char *tilFile) {
    ti = load_til(tilpath, tilFile, err, sizeof(err));
 }
 
-void emu_exit(dword /*retval*/) {
+void emu_exit(dword retval) {
+   msg("Program exited with code %d\n", retval);
+   shouldBreak = 1;
 }
 
-void emu_read(dword /*fd*/, dword /*buf*/, dword /*len*/) {
+dword emu_read(dword /*fd*/, dword /*buf*/, dword len) {
+   return len;
 }
 
-void emu_write(dword /*fd*/, dword /*buf*/, dword /*len*/) {
+dword emu_write(dword /*fd*/, dword /*buf*/, dword len) {
+   return len;
 }
 
-void emu_open(dword /*fname*/, dword /*flags*/, dword /*mode*/) {
+dword emu_open(dword /*fname*/, dword /*flags*/, dword /*mode*/) {
+   return 0;
 }
 
-void emu_close(dword /*fd*/) {
+dword emu_close(dword /*fd*/) {
+   return 0;
+}
+
+dword linux_mmap(dword offset) {
+   //edx - prot, esi - flags, edi - fd
+   dword len = ecx;
+   dword base = ebx & 0xFFFFF000;
+   if (base) {
+      dword end = (base + ecx + 0xFFF) & 0xFFFFF000;
+      len = end - base;
+   }
+   else {
+      len = (len + 0xFFF) & 0xFFFFF000;
+   }
+   dword res = MemMgr::mmap(base, len, edx, esi);
+   if (esi & LINUX_MAP_ANONYMOUS) {
+      //mmap'ing a file
+   }
+   return res;
+}
+
+void emu_exit_group(dword retval) {
+   msg("Program exited with code %d\n", retval);
+   shouldBreak = 1;
 }
 
 void syscall() {
    int syscallNum = eax;
-   switch (syscallFlavor) {
-      case SYSCALL_FLAVOR_LINUX:
+   switch (os_personality) {
+      case PERS_LINUX_26:
          switch (syscallNum) {
             case LINUX_SYS_EXIT:
                emu_exit(ebx);
@@ -2849,24 +2881,98 @@ void syscall() {
             case LINUX_SYS_FORK:
                break;
             case LINUX_SYS_READ:
-               emu_read(ebx, ecx, edx);
+               eax = emu_read(ebx, ecx, edx);
                break;
             case LINUX_SYS_WRITE:
-               emu_write(ebx, ecx, edx);
+               eax = emu_write(ebx, ecx, edx);
                break;
             case LINUX_SYS_OPEN:
-               emu_open(ebx, ecx, edx);
+               eax = emu_open(ebx, ecx, edx);
                break;
             case LINUX_SYS_CLOSE:
-               emu_close(ebx);
+               eax = emu_close(ebx);
                break;
-            case LINUX_SYS_MMAP:
+            case LINUX_SYS_BRK: { //45
+               dword cbrk = kernel_node.altval(OS_LINUX_BRK);
+               segment_t *s = getseg(cbrk - 1);
+               if (ebx && ebx != cbrk) {
+                  if (ebx > inf.omaxEA) {
+                     dword newbrk = (ebx + 0xfff) & ~0xfff;
+                     if (s) {
+                        set_segm_end(cbrk - 1, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
+                        if (newbrk > cbrk) {
+                           for (dword i = cbrk; i < newbrk; i++) {
+                              patch_byte(i, 0);
+                           }
+                        }
+                     }
+                     cbrk = newbrk;
+                     kernel_node.altset(OS_LINUX_BRK, cbrk);
+                  }
+               }
+               eax = cbrk;
                break;
-            case LINUX_SYS_MUNMAP:
+            }
+            case LINUX_SYS_MMAP: //90
+               //ebx - addr, ecx - len
+               //edx - prot, esi - flags, edi - fd, ebp - offset
+               eax = linux_mmap(ebp);
+               break;
+            case LINUX_SYS_MUNMAP: //91
+               eax = 0;
+               break;
+            case LINUX_SYS_MPROTECT:  // 125
+               eax = 0;
+               break;
+            case LINUX_SYS_MMAP2:  //192
+               //ebx - addr, ecx - len
+               //edx - prot, esi - flags, edi - fd, ebp - offset >> 12
+               eax = linux_mmap(ebp << 12);
+               break;
+            case LINUX_SYS_SET_THREAD_AREA: { //243
+               dword desc = readDword(ebx);
+               //need a gdt implementation
+               if (desc == 0xffffffff) {
+                  //we choose desc
+                  //should scan thread for one of 3 available descriptors
+                  //linux does #define GDT_ENTRY_TLS_MIN 6
+                  desc = GDT_ENTRY_TLS_MIN;
+                  //we always choose 6 for now
+               }
+               else if (desc < GDT_ENTRY_TLS_MIN || desc > GDT_ENTRY_TLS_MAX) {
+                  eax = (unsigned int)-LINUX_EINVAL;
+                  break;
+               }
+               unsigned int base = readDword(ebx + 4);
+               unsigned int limit = readDword(ebx + 8);
+               setGdtDesc(desc, base, limit);
+               writeDword(ebx, desc);
+               eax = 0;
+               break;
+            }
+            case LINUX_SYS_GET_THREAD_AREA: { //243
+               unsigned int desc = readDword(ebx);
+               //need a gdt/ldt implementation
+               if (desc < GDT_ENTRY_TLS_MIN || desc > GDT_ENTRY_TLS_MAX) {
+                  eax = (unsigned int)-LINUX_EINVAL;
+                  break;
+               }
+               unsigned int base = getGdtDescBase(desc);
+               writeDword(ebx + 4, base);
+               unsigned int limit = getGdtDescLimit(desc);
+               writeDword(ebx + 8, limit);
+               
+               //need to handle descriptor flags
+               
+               eax = 0;
+               break;
+            }
+            case LINUX_SYS_EXIT_GROUP: // 252
+               emu_exit_group(ebx);
                break;
          }
          break;
-      case SYSCALL_FLAVOR_BSD:
+      case PERS_FREEBSD_80:
          switch (syscallNum) {
             case BSD_SYS_EXIT:
                emu_exit(get_long(esp + 4));
@@ -2874,18 +2980,33 @@ void syscall() {
             case BSD_SYS_FORK:
                break;
             case BSD_SYS_READ:
-               emu_read(get_long(esp + 4), get_long(esp + 8), get_long(esp + 12));
+               eax = emu_read(get_long(esp + 4), get_long(esp + 8), get_long(esp + 12));
                break;
             case BSD_SYS_WRITE:
-               emu_write(get_long(esp + 4), get_long(esp + 8), get_long(esp + 12));
+               eax = emu_write(get_long(esp + 4), get_long(esp + 8), get_long(esp + 12));
                break;
             case BSD_SYS_OPEN:
-               emu_open(get_long(esp + 4), get_long(esp + 8), get_long(esp + 12));
+               eax = emu_open(get_long(esp + 4), get_long(esp + 8), get_long(esp + 12));
                break;
             case BSD_SYS_CLOSE:
-               emu_close(get_long(esp + 4));
+               eax = emu_close(get_long(esp + 4));
                break;
          }
          break;
    }
+}
+
+void linuxSyenter() {
+   //syscalls via sysenter use the same user setup as syscalls via int 0x80
+   //the difference is that linux (via __kernel_vsyscall) pushes ecx, edx, ebp
+   //before invoking sysenter.  Once these are popped, int 0x80 handlers
+   //can be used to do all the work
+   ebp = pop(SIZE_DWORD);
+   edx = pop(SIZE_DWORD);
+   ecx = pop(SIZE_DWORD);
+   cpu.eip = pop(SIZE_DWORD);  //where sysenter should return to
+   syscall();
+}
+
+void windowsSysenter() {
 }

@@ -1029,12 +1029,11 @@ typedef IMAGE_THUNK_DATA32 * PIMAGE_THUNK_DATA32;
 // Thread Local Storage
 //
 
-typedef VOID
-(__attribute__((stdcall)) *PIMAGE_TLS_CALLBACK) (
+typedef VOID (__stdcall *PIMAGE_TLS_CALLBACK) (
     PVOID DllHandle,
     DWORD Reason,
     PVOID Reserved
-    );
+);
 
 typedef struct _IMAGE_TLS_DIRECTORY64 {
     ULONGLONG   StartAddressOfRawData;

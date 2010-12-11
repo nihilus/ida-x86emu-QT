@@ -18,6 +18,8 @@
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#define NO_OBSOLETE_FUNCS
+
 #include <ida.hpp>
 #include <idp.hpp>
 #include <srarea.hpp>
@@ -28,6 +30,20 @@
 
 //lifted from intel.hpp
 #define R_fs 33
+
+#if IDA_SDK_VERSION < 500
+#define SEGDEL_KEEP 0
+#define SEGDEL_SILENT 1
+#endif
+
+#if IDA_SDK_VERSION < 530
+#define SEGMOD_SILENT 0
+#define SEGMOD_KEEP 0
+#else
+#define SEGDEL_KEEP SEGMOD_KEEP
+#define SEGDEL_SILENT SEGMOD_SILENT
+#endif
+
 
 #define SEG_RESERVE 200
 
@@ -120,9 +136,68 @@ void MemMgr::reserve(dword addr, dword size) {
    }
 }
 
-dword MemMgr::mmap(dword addr, dword size, dword /*prot*/, dword /*flags*/, const char *name) {
+dword MemMgr::mapFixed(dword addr, dword size, dword /*prot*/, dword flags, const char *name) {
+   if (addr == 0 || (flags & MM_MAP_FIXED) == 0) {
+      return BADADDR;
+   }
+   dword end = addr + size;
+   segment_t *s = getseg(addr);
+   segment_t *n = next_seg(addr);
+
+   while (n && end >= n->endEA) {
+      //range completely consumes next segment
+      del_segm(n->startEA, SEGDEL_KEEP | SEGDEL_SILENT);
+      n = next_seg(addr);
+   }
+   if (n && end > n->startEA) {
+      //range partly overlaps next segment
+      set_segm_start(n->startEA, end, SEGMOD_SILENT);
+   }
+
+   if (s) {
+      if (s->startEA < addr) {
+         //may need to split segment
+         //addr == s->startEA
+         if (end >= s->endEA) {
+            //new extends beyond end of s
+            set_segm_end(s->startEA, addr, SEGMOD_SILENT);
+         }
+         else {
+            //old completely overlaps new
+         }
+      }
+      else {
+         //addr == s->startEA
+         if (end >= s->endEA) {
+            //new completely overlaps s
+            del_segm(s->startEA, SEGDEL_KEEP | SEGDEL_SILENT);
+         }
+         else {
+            //need to move startEA
+            set_segm_start(s->startEA, end, SEGMOD_SILENT);
+         }
+      }
+   }
+   
+   dword suffix = (addr >> 12) & 0xFFFFF;
+   if (name == NULL) {
+      char segName[64];
+      ::qsnprintf(segName, sizeof(segName), "mmap_%05x", suffix);
+      createNewSegment(segName, addr, size);
+   }
+   else {
+      createNewSegment(name, addr, size);
+   }
+   return addr;
+}
+
+dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *name) {
+   if (flags & MM_MAP_FIXED) {
+      return mapFixed(addr, size, prot, flags, name);
+   }
    if (addr == 0) {
-      addr = inf.minEA;
+      addr = kernel_node.altval(OS_MIN_ADDR);
+//      addr = inf.minEA;
    }
    while (1) {
       segment_t *s = getseg(addr);
@@ -156,18 +231,13 @@ dword MemMgr::mmap(dword addr, dword size, dword /*prot*/, dword /*flags*/, cons
    }
 }
 
-#if IDA_SDK_VERSION < 530
-#define SEGMOD_KEEP 0x0002
-#endif
-
-
 dword MemMgr::munmap(dword addr, dword size) {
    segment_t *s = getseg(addr);
    size = (size + 0xFFF) & 0xFFFFF000;
    dword end = addr + size;
    if (s) {
       if (end >= s->endEA) {
-         del_segm(addr, SEGMOD_KEEP);
+         del_segm(addr, SEGDEL_KEEP);
       }
       else {
          set_segm_start(addr, end, SEGMOD_KEEP);

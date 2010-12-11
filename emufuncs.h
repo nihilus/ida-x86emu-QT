@@ -183,12 +183,9 @@ void emu_GetCommandLineW(dword addr);
 
 dword addHeapCommon(unsigned int maxSize, unsigned int base = 0);
 
-enum {
-   SYSCALL_FLAVOR_LINUX,
-   SYSCALL_FLAVOR_BSD
-};
-
 void syscall();
+void linuxSyenter();
+void windowsSysenter();
 
 void makeImportLabel(dword addr, dword val);
 void saveModuleList(Buffer &b);

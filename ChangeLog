@@ -1,3 +1,11 @@
+* 12/11/10
+  Fixed bug in 16 bit address mode decoding pointed out by Rafal Cyran
+  
+* 11/23/10
+  Fixed behavior of cmovXX instruction.
+  Implemented cmpxchg instruction.
+  Fixed bug in MOV seg, reg
+  
 * 11/02/10
   Released version 1.0.4 of the emulator. This is a bug fix release.
   Fixed crash resulting from failure to unhook notification in some

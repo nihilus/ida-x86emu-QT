@@ -281,9 +281,9 @@ void setInterruptGate(dword base, dword interrupt_number,
    writeMem(base + interrupt_number + 4, 0xEE00, SIZE_WORD);
 }
 
-void initIDTR() {
-   cpu.idtr.base = HeapBase::getHeap()->calloc(0x200, 1);
-   cpu.idtr.limit = 0x200;
+void initIDTR(dword idtBase, dword idtLimit) {
+   cpu.idtr.base = idtBase;
+   cpu.idtr.limit = idtLimit;
    if (usingSEH()) {
       setInterruptGate(cpu.idtr.base, 0, cs, SEH_MAGIC);
       setInterruptGate(cpu.idtr.base, 1, cs, SEH_MAGIC);
@@ -295,6 +295,54 @@ void initIDTR() {
    }
 }
 
+void initGDTR(dword gdtBase, dword gdtLimit) {
+   cpu.gdtr.base = gdtBase;
+   cpu.gdtr.limit = gdtLimit;
+}
+
+unsigned int getGdtDescBase(unsigned int desc) {
+   desc *= 8;  //index into gdt
+   if (desc < cpu.gdtr.limit) {
+      unsigned int base = readDword(cpu.gdtr.base + desc);
+      unsigned int d2 = readDword(cpu.gdtr.base + desc + 4);
+      unsigned int d3 = (d2 & 0xFF) << 16;
+      d2 &= 0xff000000;
+      base >>= 16;
+      base |= d2 | d3;
+      return base;
+   }
+   else {
+      //some sort of access violation
+      return 0;
+   }
+}
+
+unsigned int getGdtDescLimit(unsigned int desc) {
+   desc *= 8;  //index into gdt
+   if (desc < cpu.gdtr.limit) {
+      unsigned int limit = readMem(cpu.gdtr.base + desc, SIZE_DWORD) & 0xffff;
+      unsigned int d2 = readMem(cpu.gdtr.base + desc + 4, SIZE_DWORD) & 0xff0000;
+      return limit | d2;
+   }
+   else {
+      //some sort of access violation
+      return 0;
+   }
+}
+
+void setGdtDesc(unsigned int desc, unsigned int base, unsigned int limit) {
+   desc *= 8;
+   if (desc < cpu.gdtr.limit) {
+      unsigned int d1 = (base << 16) | ((limit >> 16) & 0xffff);
+      unsigned int d2 = ((base >> 16) & 0xff) | (base & 0xff000000) | (limit & 0xf0000);
+      writeDword(cpu.gdtr.base + desc, d1);
+      writeDword(cpu.gdtr.base + desc + 4, d2);
+   }
+   else {
+      //some sort of access violation
+   }   
+}
+
 #ifdef __IDP__
 
 int saveState(netnode &f) {
@@ -302,7 +350,7 @@ int saveState(netnode &f) {
    dword sz;
 //   Buffer b(CPU_VERSION);
    Buffer b;
-   int personality = f.altval(HEAP_PERSONALITY);
+//   int personality = f.altval(HEAP_PERSONALITY);
 
    //need to start writing version magic as first 4 bytes
    //current registers for active thread are saved here
@@ -319,30 +367,36 @@ int saveState(netnode &f) {
    b.write((char*)&tsc, sizeof(tsc));
    b.write((char*)&importSavePoint, sizeof(importSavePoint));
 
+/*
    if (personality == 0) {
-      HeapBase::getHeap()->save(b);
+      if (HeapBase::getHeap()) {
+         HeapBase::getHeap()->save(b);
+      }
    }
    else {
+*/
       //new style heaps are saved into a dedicated netnode
-      Buffer hb;
-      netnode hn("$ X86emu Heap");
-      HeapBase::getHeap()->save(hb);
-
-      if (!hb.has_error()) {
-         unsigned char *hbuf = NULL;
-         // Delete any previous blob data in the IDA database node.
-         //
-         hn.delblob(0, 'B');
-         //
-         // Convert the output blob object into a buffer and
-         // store it in the database node.
-         //
-         dword hsz = hb.get_wlen();
-      //   msg("x86emu: writing blob of size %d.\n", sz);
-         hbuf = hb.get_buf();
-         hn.setblob(hbuf, hsz, 0, 'B');
-      }      
-   }
+      if (HeapBase::getHeap()) {
+         Buffer hb;
+         netnode hn("$ X86emu Heap");
+         HeapBase::getHeap()->save(hb);
+   
+         if (!hb.has_error()) {
+            unsigned char *hbuf = NULL;
+            // Delete any previous blob data in the IDA database node.
+            //
+            hn.delblob(0, 'B');
+            //
+            // Convert the output blob object into a buffer and
+            // store it in the database node.
+            //
+            dword hsz = hb.get_wlen();
+         //   msg("x86emu: writing blob of size %d.\n", sz);
+            hbuf = hb.get_buf();
+            hn.setblob(hbuf, hsz, 0, 'B');
+         }
+      }
+//   }
 
    saveHookList(b);
    saveModuleList(b);
@@ -405,7 +459,7 @@ int saveState(netnode &f) {
 int loadState(netnode &f) {
    unsigned char *buf = NULL;
    size_t sz;
-   int personality = f.altval(HEAP_PERSONALITY);
+//   int personality = f.altval(HEAP_PERSONALITY);
    // Fetch the blob attached to the node.
    if ((buf = (unsigned char *)f.getblob(NULL, &sz, 0, 'B')) == NULL) return X86EMULOAD_NO_NETNODE;
 //   msg("x86emu: netnode found, sz = %d.\n", sz);
@@ -433,9 +487,25 @@ int loadState(netnode &f) {
    b.read((char*)&tsc, sizeof(tsc));
    b.read((char*)&importSavePoint, sizeof(importSavePoint));
 
+/*
    if (personality == 0) {
       EmuHeap::loadHeapLayout(b);
    }
+   else {
+*/
+      unsigned char *hbuf = NULL;
+      size_t hsz;
+      netnode hn("$ X86emu Heap");
+      // Fetch the blob attached to the node.
+      if ((hbuf = (unsigned char *)hn.getblob(NULL, &hsz, 0, 'B')) != NULL) {
+         Buffer hb(hbuf, hsz);
+         EmuHeap::loadHeapLayout(hb);
+      }
+      else {
+//         msg("x86emu: netnode found, sz = %d.\n", sz);
+//         return X86EMULOAD_NO_NETNODE;
+      }
+//   }
 
    loadHookList(b);
    loadModuleList(b);
@@ -489,10 +559,11 @@ int loadState(netnode &f) {
 //      loadVEHState(b);
    }
 
+/*
    if (!b.has_error() && cpu.idtr.base == 0) {
       initIDTR();
    }
-
+*/
    qfree(buf);
 
    //read fpu state
@@ -510,17 +581,10 @@ int loadState(netnode &f) {
 
 void resetCpu() {
    memset(cpu.general, 0, sizeof(cpu.general));
-   segment_t *s = get_segm_by_name(".stack");
-   if (s == NULL) {
-      //error NULL stack seg
-      esp = 0xC0000000;
-   }
-   else {
-      esp = s->endEA;
-   }
    cpu.eip = 0xFFF0;
    //enable interrupts by default per Kris Kaspersky
    cpu.eflags = xIF | 2;
+   cpu.gdtr.base = cpu.idtr.base = 0;
    cpu.gdtr.limit = cpu.idtr.limit = 0xFFFF;
    cs = 0xF000;  //base = 0xFFFF0000, limit = 0xFFFF
    cr0 = 0x60000010;
@@ -529,9 +593,9 @@ void resetCpu() {
    //need to clear the heap in here as well then allocate a new idt
 }
 
-void initProgram(unsigned int entry) {
+void initProgram(unsigned int entry, dword idtBase, dword idtLimit) {
    cpu.eip = entry;
-   initIDTR();
+   initIDTR(idtBase, idtLimit);
 }
 
 //sign extension functions
@@ -728,10 +792,26 @@ void initiateInterrupt(dword interrupt_number, dword saved_eip) {
          //should distinguish between Linux and FreeBSD then read eax
          //and perform some action
          syscall();
+         cpu.eip = pop(SIZE_DWORD);
+         cs = pop(SIZE_DWORD);
+         cpu.eflags = pop(SIZE_DWORD);
       }
    }
    else {
       msg("x86emu: Found NULL interrupt handler, no action taken\n");
+   }
+}
+
+void doSysenter() {
+   switch (os_personality) {
+      case PERS_WINDOWS_XP:
+         windowsSysenter();
+         break;
+      case PERS_LINUX_26:
+         linuxSyenter();
+         break;
+      default:
+         msg("sysenter encountered with no defined OS personality\n");
    }
 }
 
@@ -761,10 +841,10 @@ void fetchOperands16(AddrInfo *dest, AddrInfo *src) {
             src->addr = ebx + esi;
             break;
          case 1:
-            src->addr = ebp + esi;
+            src->addr = ebx + edi;
             break;
          case 2:
-            src->addr = ebx + edi;
+            src->addr = ebp + esi;
             break;
          case 3:
             src->addr = ebp + edi;
@@ -1150,6 +1230,9 @@ dword rcr(qword op, byte amt) {
    //remove unnecessary rotations
    amt = amt % (ROTATE_SIZE_MASKS[opsize] + 2);
    if (amt) {
+      if (amt == 1) {
+         checkLeftOverflow((dword)op, opsize);
+      }
       for (int i = amt; i; i--) {
          if (temp) op |= CARRY_BITS[opsize];  //prepare to feed carry in from left
          else op &= ~CARRY_BITS[opsize];
@@ -1158,24 +1241,18 @@ dword rcr(qword op, byte amt) {
       }
       if (temp) SET(xCF);  //set final carry
       else CLEAR(xCF);
-      if (amt == 1) {
-         dword shift = (dword)op << 1;
-         shift = (shift ^ (dword)op) & SIGN_BITS[opsize];
-         if (shift) SET(xOF);
-         else CLEAR(xOF);
-      }
    }
    return (dword) op & SIZE_MASKS[opsize];
 }
 
 dword shl(qword op, byte amt) {
    if (amt) {
-      if (amt == 1) {
-         checkLeftOverflow((dword)op, opsize);
-      }
       op <<= amt;
       if (op & CARRY_BITS[opsize]) SET(xCF);
       else CLEAR(xCF);
+      if (amt == 1) {
+         checkLeftOverflow((dword)op, opsize);
+      }
       setEflags(op, opsize);  //flags only affected when amt != 0
    }
    return (dword) op & SIZE_MASKS[opsize];
@@ -1811,7 +1888,7 @@ int doEight() {
       decodeAddressingModes();
       storeOperand(&dest, getOperand(&source));
       break;
-   case 0xC: //MOVE reg seg - NOT using segment registers at the moment
+   case 0xC: //MOV reg seg
       fetchOperands(&source, &dest); //generate the address
       storeOperand(&dest, cpu.segReg[seg3_map[source.addr]]); //store the address
       break;
@@ -1819,10 +1896,22 @@ int doEight() {
       fetchOperands(&dest, &source); //generate the address
       storeOperand(&dest, source.addr); //store the address
       break;
-   case 0xE: //MOVE seg reg - NOT using segment registers at the moment
+   case 0xE: { //MOV seg reg
       fetchOperands(&dest, &source); //generate the address
-      cpu.segReg[seg3_map[source.addr]] = (word)cpu.general[source.addr];
+      //should generate invalid opcode #UD here if dest == CS
+      //need to load segment shadow base from GDT/LDT
+      unsigned int segReg = seg3_map[dest.addr];
+      word newSeg = (word)cpu.general[source.addr];
+      cpu.segReg[segReg] = newSeg;
+      if (newSeg & 4) {
+         //LDT descriptor
+      }
+      else {
+         //GDT descriptor
+         cpu.segBase[segReg] = getGdtDescBase(newSeg >> 3);
+      }
       break;
+   }
    case 0xF: {//POP
          dword val = pop(opsize);
          fetchOperands(&source, &dest); //no source, just generate destination info
@@ -3599,12 +3688,20 @@ int doEscape() {
                break;
          }
          break;
-      case 3: //
-         if (lower == 1) { //RDTSC
-            edx = (dword) tsc.high;
-            eax = (dword) tsc.low;
+      case 3: { //
+         switch (lower) {
+            case 1: //RDTSC
+               edx = (dword) tsc.high;
+               eax = (dword) tsc.low;
+               break;
+            case 4: //SYSENTER
+               doSysenter();
+               break;
+            case 5: //SYSEXIT
+               break;
          }
          break;
+      }
       case 4: { //CMOVcc
          int doMove = 0;
          switch (lower) {
@@ -3657,8 +3754,8 @@ int doEscape() {
                doMove = xG;
                break;
          }
+         fetchOperands(&dest, &source);
          if (doMove) {
-            fetchOperands(&source, &dest);
             storeOperand(&dest, getOperand(&source));
          }
          break;
@@ -4600,6 +4697,24 @@ int doEscape() {
          break;
       case 0xB:
          switch (lower) {
+            case 0:  //CMPXCHG
+               opsize = SIZE_BYTE;
+            case 1: { //CMPXCHG
+               fetchOperands(&source, &dest);
+               result = getOperand(&dest);
+               cmp(eax, result);
+               msg("cmpxchg comparing (eax) 0x%x to (dest) 0x%x\n", eax, result);
+               if (xZ) {
+                  result = getOperand(&source);
+                  msg("cmpxchg compare equal, setting dest = 0x%x\n", result);
+                  storeOperand(&dest, result);
+               }
+               else {
+                  msg("cmpxchg compare not equal, setting eax = 0x%x\n", result);
+                  eax = result;
+               }
+               break;
+            }
             case 3:  //BTR
                doBitOp(doBitReset);
                break;

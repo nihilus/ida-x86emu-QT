@@ -81,6 +81,18 @@ void memoryAccessException();
 #if IDA_SDK_VERSION >= 530
 TForm *mainForm;
 TCustomControl *stackCC;
+#else
+#define SEGMOD_SILENT 0
+#define SEGMOD_KEEP 0
+segment_t *get_first_seg(void) {
+   int nseg = segs.get_next_area(0);
+   return (segment_t*)segs.getn_area(nseg);
+}
+
+segment_t *get_last_seg(void) {
+   int nseg = segs.get_prev_area(0xffffffff);
+   return (segment_t*)segs.getn_area(nseg);
+}
 #endif
 
 #ifdef __NT__
@@ -116,6 +128,7 @@ static const int X86EMU_BLOB_VERSION_MINOR = 1;
 //The node name to use to identify the plug-in's storage
 //node in the IDA database.
 static const char x86emu_node_name[] = "$ X86 CPU emulator state";
+static const char kernel_node_name[] = "$ X86 kernel state";
 static const char funcinfo_node_name[] = "$ X86emu FunctionInfo";
 static const char petable_node_name[] = "$ X86emu PETables";
 static const char module_node_name[] = "$ X86emu ModuleInfo";
@@ -125,6 +138,7 @@ static const char heap_node_name[] = "$ X86emu Heap";
 //The IDA database node identifier into which the plug-in will
 //store its state information when the database is saved.
 netnode x86emu_node(x86emu_node_name);
+netnode kernel_node(kernel_node_name);
 static netnode funcinfo_node(funcinfo_node_name);
 static netnode petable_node(petable_node_name);
 static netnode module_node(module_node_name);
@@ -164,6 +178,8 @@ bool uiHooked = false;
 dword OSMajorVersion = 5;
 dword OSMinorVersion = 1;
 dword OSBuildNumber = 2600;
+
+unsigned int os_personality;
 
 extern til_t *ti;
 
@@ -998,6 +1014,8 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
    
          baseTime.dwLowDateTime = x86emu_node.altval(SYSTEM_TIME_LOW);
          baseTime.dwHighDateTime = x86emu_node.altval(SYSTEM_TIME_HIGH);
+         
+         os_personality = x86emu_node.altval(OS_PERSONALITY);
       }
       else {
          msg("x86emu: No saved x86emu state data was found.\n");
@@ -1522,6 +1540,14 @@ void formatStack(dword begin, dword end) {
 #endif
 }
 
+void createIdt(dword idtBase, dword idtLimit) {
+   MemMgr::mmap(idtBase, idtLimit, 0, 0, ".idt");
+}
+
+void createGdt(dword gdtBase, dword gdtLimit) {
+   MemMgr::mmap(gdtBase, gdtLimit, 0, 0, ".gdt");
+}
+
 void createWindowsStack(dword /*top*/, dword /*size*/) {
    esp = 0x130000;
    dword base = esp - 0x4000;
@@ -1771,6 +1797,8 @@ void buildElfEnvironment() {
    //add other environment strings
    elfEnvStart = esp;
    esp &= 0xFFFFFFFC;
+   
+   //need to create elf tables in here as well
 }
 
 void createElfStack() {
@@ -1886,7 +1914,29 @@ void idaapi run(int /*arg*/) {
          //they may not be available by the time the user decides to run the plugin
          GetSystemTimeAsFileTime(&baseTime);
          x86emu_node.create(x86emu_node_name);
+
+         segment_t *s = get_first_seg();
+         if (s && (s->startEA & 0xFFF)) {
+            dword currstart = s->startEA;
+            dword newstart = s->startEA & ~0xFFF;
+            set_segm_start(s->startEA, newstart, SEGMOD_SILENT);
+            for (dword i = newstart; i < currstart; i++) {
+               patch_byte(i, 0);
+            }
+         }
+         
          x86emu_node.altset(X86_MINEA, inf.minEA);
+         
+         s = get_last_seg();
+         if (s && (s->endEA & 0xFFF)) {
+            dword currend = s->endEA;
+            dword newend = (s->endEA + 0xFFF) & ~0xFFF;
+            set_segm_end(s->startEA, newend, SEGMOD_SILENT);
+            for (dword i = currend; i < newend; i++) {
+               patch_byte(i, 0);
+            }
+         }
+         
          x86emu_node.altset(X86_MAXEA, inf.maxEA);
          getRandomBytes(&randVal, 4);
          x86emu_node.altset(X86_RANDVAL, randVal);
@@ -1897,6 +1947,43 @@ void idaapi run(int /*arg*/) {
          getRandomBytes(&tsc, 6);
          char *t = (char*)&tsc;
          t[5] &= 3;              //truncate time somewhat
+
+         kernel_node.create(kernel_node_name);
+         if (inf.filetype == f_PE) {
+            //need to allow this to be user selectable at some point
+            os_personality = PERS_WINDOWS_XP;
+            
+            kernel_node.altset(OS_MAX_FILES, WIN_MAX_FILES);
+            kernel_node.altset(OS_PAGE_SIZE, WIN_PAGE_SIZE);
+            kernel_node.altset(OS_STACK_TOP, WIN_STACK_TOP);
+            kernel_node.altset(OS_STACK_SIZE, WIN_STACK_SIZE);
+            kernel_node.altset(OS_MIN_ADDR, WIN_ALLOC_MIN);
+            kernel_node.altset(OS_MAX_ADDR, WIN_TASK_SIZE_MAX);
+            kernel_node.altset(OS_IDT_BASE, WIN_IDT_BASE);
+            kernel_node.altset(OS_IDT_LIMIT, WIN_IDT_LIMIT);
+            kernel_node.altset(OS_GDT_BASE, WIN_GDT_BASE);
+            kernel_node.altset(OS_GDT_LIMIT, WIN_GDT_LIMIT);
+            
+         }
+         else if (inf.filetype == f_ELF) {
+            //need to allow this to be user selectable at some point
+            //need a better assumption than ELF == Linux
+            os_personality = PERS_LINUX_26;
+
+            kernel_node.altset(OS_MAX_FILES, LINUX_MAX_FILES);
+            kernel_node.altset(OS_PAGE_SIZE, LINUX_PAGE_SIZE);
+            kernel_node.altset(OS_STACK_TOP, LINUX_STACK_TOP);
+            kernel_node.altset(OS_STACK_SIZE, LINUX_STACK_SIZE);
+            kernel_node.altset(OS_MIN_ADDR, LINUX_ALLOC_MIN);
+            kernel_node.altset(OS_MAX_ADDR, LINUX_TASK_SIZE_MAX);
+            kernel_node.altset(OS_IDT_BASE, LINUX_IDT_BASE);
+            kernel_node.altset(OS_IDT_LIMIT, LINUX_IDT_LIMIT);
+            kernel_node.altset(OS_GDT_BASE, LINUX_GDT_BASE);
+            kernel_node.altset(OS_GDT_LIMIT, LINUX_GDT_LIMIT);
+
+            kernel_node.altset(OS_LINUX_BRK, inf.maxEA);
+         }
+         x86emu_node.altset(OS_PERSONALITY, os_personality);
       }      
       
       //test for presence of personality
@@ -1935,6 +2022,10 @@ void idaapi run(int /*arg*/) {
       }
       if (!cpuInit) {
          dword init_eip = get_screen_ea();
+         dword idtBase = 0;
+         dword idtLimit = 0x800;
+         dword gdtBase = 0;
+         dword gdtLimit = 0x400;
          if (inf.filetype == f_PE) {
             enableSEH();
             //typical values for Windows XP segment registers
@@ -1944,15 +2035,39 @@ void idaapi run(int /*arg*/) {
             esi = 0xffffffff;
             ecx = esp - 0x14;
             ebp = 0x12fff0;
+            
+            cpu.eflags |= 0x3000;  //ring 3
+            
+            idtBase = WIN_IDT_BASE;
+            idtLimit = WIN_IDT_LIMIT;
+            gdtBase = WIN_GDT_BASE;
+            gdtLimit = WIN_GDT_LIMIT;
+            
          }
          else { //"elf" and others land here
-            createElfHeap();   //do this first so it goes right after exe
+            //need to properly handle brk and heap creation
+//            createElfHeap();   //do this first so it goes right after exe
             createElfStack();
             buildElfEnvironment();
             //create initial thread
             threadList = activeThread = new ThreadNode();
+
+            es = ss = ds = 0x7b;
+            cs = 0x73;
+            fs = 0;
+            gs = 0;
+
+            cpu.eflags |= 0x3000;  //ring 3
+
+            idtBase = LINUX_IDT_BASE;
+            idtLimit = LINUX_IDT_LIMIT;
+            gdtBase = LINUX_GDT_BASE;
+            gdtLimit = LINUX_GDT_LIMIT;
          }
-         initProgram(init_eip);
+         createIdt(idtBase, idtLimit);
+         createGdt(gdtBase, gdtLimit);
+         initProgram(init_eip, idtBase, idtLimit);
+         initGDTR(gdtBase, gdtLimit);
       }
 
       pCmdLineA = x86emu_node.altval(EMU_COMMAND_LINE);  

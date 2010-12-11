@@ -103,6 +103,7 @@ typedef int int32_t;
 #include "sdk_versions.h"
 
 extern netnode x86emu_node;
+extern netnode kernel_node;
 
 #endif
 
@@ -376,12 +377,90 @@ extern unsigned int randVal;
 #ifdef __IDP__
 //if building an IDA plugin, then here are some defines
 
+//OS kernel altvals
+#define OS_MAX_FILES 1
+#define OS_PAGE_SIZE 2
+#define OS_STACK_TOP 10
+#define OS_STACK_SIZE 11
+#define OS_MIN_ADDR 12
+#define OS_MAX_ADDR 13
+
+#define OS_IDT_BASE 20
+#define OS_IDT_LIMIT 21
+#define OS_GDT_BASE 22
+#define OS_GDT_LIMIT 23
+
+#define OS_CUSTOM 2000
+
+//Windows related values
+#define WIN_MAX_FILES 256
+
+#define WIN_PAGE_OFFSET 0x80000000
+
+#define WIN_TASK_SIZE               WIN_PAGE_OFFSET
+#define WIN_TASK_SIZE_MAX           WIN_TASK_SIZE
+#define WIN_STACK_TOP               0x230000
+#define WIN_STACK_TOP_MAX           WIN_STACK_TOP
+#define WIN_STACK_SIZE              0x200000
+
+#define WIN_ALLOC_MIN  WIN_STACK_TOP
+
+#define WIN_PAGE_SIZE 0x1000
+#define WIN_PAGE_MASK (WIN_PAGE_SIZE - 1)
+
+#define WIN_IDT_BASE   0x80b95400
+#define WIN_IDT_LIMIT   0x800            //actual is 0x7ff ??
+#define WIN_GDT_BASE   (WIN_IDT_BASE-0x400)
+#define WIN_GDT_LIMIT   0x400            //actual is 0x3ff ??
+
+
+//some windows specific altvals
+#define OS_WINDOWS_PEB_BASE OS_CUSTOM
+#define OS_WINDOWS_TEB_BASE (OS_CUSTOM+1)
+
+//Linux related values
+#define LINUX_MAX_FILES 256
+
+#define LINUX_ALLOC_MIN 0x110000
+
+#define LINUX_PAGE_OFFSET 0xC0000000
+
+#define LINUX_TASK_SIZE               LINUX_PAGE_OFFSET
+#define LINUX_TASK_SIZE_MAX           LINUX_TASK_SIZE
+#define LINUX_STACK_TOP               LINUX_TASK_SIZE
+#define LINUX_STACK_TOP_MAX           LINUX_STACK_TOP
+#define LINUX_STACK_SIZE              0x8000000
+
+#define LINUX_PAGE_SIZE 0x1000
+#define LINUX_PAGE_MASK (LINUX_PAGE_SIZE - 1)
+
+#define LINUX_IDT_BASE   0xC0951000
+#define LINUX_IDT_LIMIT   0x800            //actual is 0x7ff ??
+#define LINUX_GDT_BASE   0xC1800000
+#define LINUX_GDT_LIMIT   0x100            //actual is 0xff ??
+
+#define LINUX_PAGE_ALIGN(x)    (((x) + LINUX_PAGE_MASK) & ~LINUX_PAGE_MASK)
+#define LINUX_TASK_UNMAPPED_BASE      (LINUX_PAGE_ALIGN(LINUX_TASK_SIZE / 3))
+
+//some linux specific altvals
+#define OS_LINUX_BRK OS_CUSTOM
+
 //heap personality type values
 #define LEGACY_HEAP 100
 #define DLMALLOC_2_7_2_HEAP 101
 #define JEMALLOC_HEAP 102
 #define PHKMALLOC_HEAP 103
 #define RTL_HEAP 104
+
+#define PERS_NONE 0
+#define PERS_WINDOWS_2k 1
+#define PERS_WINDOWS_XP 5
+#define PERS_WINDOWS_VISTA 10
+#define PERS_WINDOWS_7 15
+#define PERS_LINUX_26 100
+#define PERS_FREEBSD_80 200
+
+extern unsigned int os_personality;
 
 //various emulator related altval indicies
 #define X86_EMU_INIT 1

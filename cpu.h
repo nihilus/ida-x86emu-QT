@@ -128,7 +128,7 @@ enum {
    X86EMUSAVE_FAILED                // state save failed (buffer problems)
 };
 
-void initProgram(unsigned int entry);
+void initProgram(unsigned int entry, unsigned int idtBase, unsigned int idtLimit);
 void enableSEH();
 
 void resetCpu();
@@ -144,6 +144,11 @@ dword readMem(dword addr, byte size);
 
 int executeInstruction();
 void doInterruptReturn();
+
+void initGDTR(dword gdtBase, dword gdtLimit);
+unsigned int getGdtDescBase(unsigned int desc);
+unsigned int getGdtDescLimit(unsigned int desc);
+void setGdtDesc(unsigned int desc, unsigned int base, unsigned int limit);
 
 typedef int (*operand_func)(void);
 
