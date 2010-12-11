@@ -6,6 +6,12 @@
 // Image Format
 //
 
+#ifdef _MSC_VER
+#define _STDCALL __stdcall
+#else
+#define _STDCALL __attribute__ ((stdcall))
+#endif
+
 typedef unsigned short WORD, *PWORD, *LPWORD; 
 typedef short SHORT;
 typedef unsigned long DWORD, *PDWORD, *LPDWORD; 
@@ -1029,7 +1035,7 @@ typedef IMAGE_THUNK_DATA32 * PIMAGE_THUNK_DATA32;
 // Thread Local Storage
 //
 
-typedef VOID (__stdcall *PIMAGE_TLS_CALLBACK) (
+typedef VOID (_STDCALL *PIMAGE_TLS_CALLBACK) (
     PVOID DllHandle,
     DWORD Reason,
     PVOID Reserved
