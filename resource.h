@@ -25,6 +25,8 @@
 #define IDC_RUN_TO_CURSOR               1005
 #define IDC_MESSAGE2                    1005
 #define IDC_HIDE                        1006
+#define IDC_RUN2                        1006
+#define IDC_BREAK                       1006
 #define IDC_EAX                         1007
 #define IDC_EBX                         1008
 #define IDC_ECX                         1009
@@ -102,13 +104,18 @@
 #define IDC_HEAP_BLOCK                  40036
 #define IDC_STACK_BLOCK                 40037
 #define IDC_MMAP_BLOCK                  40038
+#define ID_FUNCTIONS_PUSH               40041
+#define ID_PUSH_PUSHMAINARGS            40042
+#define ID_PUSH_PUSHWINMAINARGS         40043
+#define ID_PUSH_PUSHDLLMAINARGS         40044
+#define IDC_LOGLIB                      40049
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        110
-#define _APS_NEXT_COMMAND_VALUE         40039
+#define _APS_NEXT_COMMAND_VALUE         40045
 #define _APS_NEXT_CONTROL_VALUE         1055
 #define _APS_NEXT_SYMED_VALUE           101
 #endif

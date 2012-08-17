@@ -7,10 +7,6 @@
 //
 // Generated from the TEXTINCLUDE 2 resource.
 //
-
-// !!!ATTENTION!!!
-// AFXRES.H last time included in Microsoft Platform SDK for Windows Server 2003 R2
-// Install and copy AFXRES.H and WINRES.H to your Visual Studio include directory if missing
 #include "afxres.h"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -87,10 +83,11 @@ BEGIN
     EDITTEXT        IDC_EIP,136,71,73,14,ES_AUTOHSCROLL | ES_READONLY
     EDITTEXT        IDC_EFLAGS,40,71,73,14,ES_AUTOHSCROLL | ES_READONLY
     GROUPBOX        "Registers",IDC_STATIC,3,0,212,86
-    PUSHBUTTON      "Push Data",IDC_PUSH,267,72,53,14
-    PUSHBUTTON      "Segments",IDC_SEGMENTS,267,58,53,14
+    PUSHBUTTON      "Push Data",IDC_PUSH,267,71,53,14
+    PUSHBUTTON      "Segments",IDC_SEGMENTS,267,55,53,14
     PUSHBUTTON      "Run",IDC_RUN,221,39,44,14
-    PUSHBUTTON      "Set Memory",IDC_SET_MEMORY,221,72,44,14
+    PUSHBUTTON      "Set Memory",IDC_SET_MEMORY,221,71,44,14
+    PUSHBUTTON      "Break",IDC_BREAK,267,39,53,14,WS_DISABLED
 END
 
 IDD_MMAP DIALOGEX 0, 0, 157, 100
@@ -337,12 +334,19 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Track fetched bytes",         IDC_TRACK
         MENUITEM "Trace execution",             IDC_TRACE
+        MENUITEM "Log library calls",           IDC_LOGLIB
     END
     POPUP "Functions"
     BEGIN
         MENUITEM "Allocate heap block...",      IDC_HEAP_BLOCK
         MENUITEM "Allocate stack block...",     IDC_STACK_BLOCK
         MENUITEM "Allocate mmap block...",      IDC_MMAP_BLOCK
+        POPUP "Push"
+        BEGIN
+            MENUITEM "Push main args",              ID_PUSH_PUSHMAINARGS
+            MENUITEM "Push WinMain args",           ID_PUSH_PUSHWINMAINARGS
+            MENUITEM "Push DllMain args",           ID_PUSH_PUSHDLLMAINARGS
+        END
     END
 END
 

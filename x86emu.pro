@@ -1,16 +1,17 @@
 
-#your Ida SDK location either relative to collabreate/trunk
+#your Ida SDK location either relative to ida-x86emu/trunk
 #or absolute
-win32:SDK = ..\..\..
+win32:SDK = ../../..
 unix:SDK = ../../..
 
 #Need to change the following to your Ida install location
-win32:IDA_APP = "C:\Program Files\Ida"
+win32:IDA_APP = "C:/Program Files/Ida"
 linux-g++:IDA_APP = $$(HOME)/ida
 macx:IDA_APP = $$(HOME)/ida/idaq.app/Contents
 
 #Need to change the following to your Qt install location
-macx:QT_LOC = /usr/local/Trolltech/Qt-4.6.3/lib
+#macx:QT_LOC = /usr/local/Trolltech/Qt-4.6.3/lib
+macx:QT_LOC = /usr/local/Trolltech/Qt-4.7.2/lib
 macx:QT_TAIL = .framework/Versions/4/Headers
 #create our own list of Qt modules
 macx:MODS = QtGui QtCore
@@ -32,10 +33,10 @@ TEMPLATE = lib
 
 CONFIG += qt dll
 
-win32-msvc2008:INCLUDEPATH += $${SDK}\include
+win32-msvc2008:INCLUDEPATH += $${SDK}/include
 linux-g++|macx|win32-g++:INCLUDEPATH += $${SDK}/include
 
-win32-msvc2008:DESTDIR = $${SDK}\bin\plugins
+win32-msvc2008:DESTDIR = $${SDK}/bin/plugins
 linux-g++|macx|win32-g++:DESTDIR = $${SDK}/bin/plugins
 
 DEFINES += __IDP__ __QT__
@@ -46,9 +47,21 @@ win32-msvc2008:DEFINES += _CRT_SECURE_NO_WARNINGS
 linux-g++:DEFINES += __LINUX__
 macx:DEFINES += __MAC__
 
-win32:LIBS += comdlg32.lib gdi32.lib user32.lib advapi32.lib
-win32-msvc2008:LIBS += $${SDK}\lib\vc.w32\ida.lib
-win32-g++:LIBS += $${SDK}/lib/gcc.w32/ida.a
+win32:LIBS += comdlg32.lib gdi32.lib user32.lib advapi32.lib ida.lib
+win32-msvc2008: {
+   exists( $${SDK}/lib/vc.w32/ida.lib ) {
+      LIBS += -L$${SDK}/lib/vc.w32
+   } else {
+      LIBS += -L$${SDK}/lib/x86_win_vc_32
+   }
+}
+win32-g++: {
+   exists( $${SDK}/lib/gcc.w32/ida.lib ) {
+      LIBS += -L$${SDK}/lib/gcc.w32
+   } else {
+      LIBS += -L$${SDK}/lib/x86_win_gcc_32
+   }
+}
 linux-g++:LIBS += -L$${IDA_APP} -lida
 macx:LIBS += -L$${IDA_APP}/MacOs -lida
 

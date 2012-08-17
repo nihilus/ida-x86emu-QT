@@ -124,7 +124,7 @@ QLineEdit *regToControl(unsigned int reg) {
 }
 
 //update the specified register display with the specified 
-//value.  useful to update register contents based on user
+//value. Useful for updating register contents based on user
 //input
 void updateRegisterDisplay(int r) {
    QLineEdit *l = regToControl(r);
@@ -227,9 +227,34 @@ void showErrorMessage(const char *msg) {
    QMessageBox::warning(getWidgetParent(), "Error", msg);
 }
 
-void argCallback(const char * /*func*/, const char *arg, int /*idx*/, void *user) {
+void argCallback(const char * /*func*/, const char *arg, int idx, void *user) {
    UnemulatedDialog *ud = (UnemulatedDialog*)user;
    ud->parm_list->addItem(arg);
+
+   if (doLogLib) {
+      int len = strlen(arg);
+      if (arg[len - 1] == '\'') {
+         const char *s = strchr(arg, '\'');
+         size_t flen = strlen(ud->functionCall) + strlen(s) + 5;
+         ud->functionCall = (char*)qrealloc(ud->functionCall, flen);
+         if (idx > 0) {
+            ::qstrncat(ud->functionCall, "\x01 ", flen);
+         }
+         ::qstrncat(ud->functionCall, s, flen);
+      }
+      else {
+         const char *s = strstr(arg, "0x");
+         size_t fend = strlen(ud->functionCall);
+         size_t flen = fend + 15;
+         ud->functionCall = (char*)qrealloc(ud->functionCall, flen);
+         if (idx > 0) {
+            ::qstrncat(ud->functionCall, "\x01 ", flen);
+            fend += 2;
+         }
+         memcpy(ud->functionCall + fend, s, 10);
+         ud->functionCall[fend + 10] = 0;
+      }
+   }
 }
 
 void UnemulatedDialog::do_ok() {
@@ -255,18 +280,45 @@ void UnemulatedDialog::do_ok() {
          esp += stackfree * 4;
       }
       accept();
+      if (doLogLib) {
+         char *p = strchr(functionCall, '(') + 1;
+         for (dword i = 0; i < stackfree; i++) {
+            char *n = strchr(p, 1);
+            if (n) {
+               p = n;
+               *p = ',';
+            }
+            else {
+               p = functionCall + strlen(functionCall);
+            }
+         }
+         *p++ = ')';
+         *p = 0;
+         msg("call: %s = 0x%x\n", functionCall, eax);
+         qfree(functionCall);
+         functionCall = NULL;
+      }
    }
 }
 
 UnemulatedDialog::UnemulatedDialog(QWidget *parent, const char *name, unsigned int addr) : QDialog(parent) {
    char buf[256];
    fname = name;
-
+   functionCall = NULL;
    if (name) {
       ::qsnprintf(buf, sizeof(buf), "Call to: %s", name);
+      if (doLogLib) {
+         size_t sz = strlen(fname) + 5;
+         functionCall = (char*)qalloc(sz);
+         ::qsnprintf(functionCall, sz, "%s(", fname);
+      }
    }
    else {
       ::qsnprintf(buf, sizeof(buf), "Call to: Location 0x%08x", addr);
+      if (doLogLib) {
+         functionCall = (char*)qalloc(14);
+         ::qsnprintf(functionCall, 14, "0x%08x(", addr);
+      }
    }
    setWindowTitle(buf);
    
@@ -759,12 +811,12 @@ static QString &formatReg(QString &qs, const char *format, dword val) {
 }
 
 void SegmentsDialog::do_ok() {
-   cs = strtoul(qcs_reg->text().toAscii().data(), NULL, 0);
-   ds = strtoul(qds_reg->text().toAscii().data(), NULL, 0);
-   es = strtoul(qes_reg->text().toAscii().data(), NULL, 0);
-   fs = strtoul(qfs_reg->text().toAscii().data(), NULL, 0);
-   gs = strtoul(qgs_reg->text().toAscii().data(), NULL, 0);
-   ss = strtoul(qss_reg->text().toAscii().data(), NULL, 0);
+   _cs = strtoul(qcs_reg->text().toAscii().data(), NULL, 0);
+   _ds = strtoul(qds_reg->text().toAscii().data(), NULL, 0);
+   _es = strtoul(qes_reg->text().toAscii().data(), NULL, 0);
+   _fs = strtoul(qfs_reg->text().toAscii().data(), NULL, 0);
+   _gs = strtoul(qgs_reg->text().toAscii().data(), NULL, 0);
+   _ss = strtoul(qss_reg->text().toAscii().data(), NULL, 0);
 
    csBase = strtoul(qcs_base->text().toAscii().data(), NULL, 0);
    dsBase = strtoul(qds_base->text().toAscii().data(), NULL, 0);
@@ -781,17 +833,17 @@ SegmentsDialog::SegmentsDialog(QWidget *parent) : QDialog(parent) {
    setSizeGripEnabled(false);
    setModal(true);
 
-   qcs_reg = new QLineEdit(formatReg(v, "0x%4.4X", cs));
+   qcs_reg = new QLineEdit(formatReg(v, "0x%4.4X", _cs));
    qcs_reg->setValidator(&aiv);
-   qgs_reg = new QLineEdit(formatReg(v, "0x%4.4X", gs));
+   qgs_reg = new QLineEdit(formatReg(v, "0x%4.4X", _gs));
    qgs_reg->setValidator(&aiv);
-   qss_reg = new QLineEdit(formatReg(v, "0x%4.4X", ss));
+   qss_reg = new QLineEdit(formatReg(v, "0x%4.4X", _ss));
    qss_reg->setValidator(&aiv);
-   qds_reg = new QLineEdit(formatReg(v, "0x%4.4X", ds));
+   qds_reg = new QLineEdit(formatReg(v, "0x%4.4X", _ds));
    qds_reg->setValidator(&aiv);
-   qes_reg = new QLineEdit(formatReg(v, "0x%4.4X", es));
+   qes_reg = new QLineEdit(formatReg(v, "0x%4.4X", _es));
    qes_reg->setValidator(&aiv);
-   qfs_reg = new QLineEdit(formatReg(v, "0x%4.4X", fs));
+   qfs_reg = new QLineEdit(formatReg(v, "0x%4.4X", _fs));
    qfs_reg->setValidator(&aiv);
    
    QFormLayout *left = new QFormLayout();
@@ -945,6 +997,18 @@ void X86Dialog::grabHeapBlock() {
    ::grabHeapBlock();
 }
 
+void X86Dialog::buildMainArgs() {
+   ::buildMainArgs();
+}
+
+void X86Dialog::buildWinMainArgs() {
+   ::buildWinMainArgs();
+}
+
+void X86Dialog::buildDllMainArgs() {
+   ::buildDllMainArgs();
+}
+
 void X86Dialog::grabMmapBlock() {
    ::grabMmapBlock();
 }
@@ -973,6 +1037,11 @@ void X86Dialog::traceExec() {
       openTraceFile();
    }
    setTracing(!getTracing()); 
+}
+
+void X86Dialog::logLibraryCalls() {
+   emulateLogLibraryAction->setChecked(!logLibrary());
+   setLogLibrary(!logLibrary()); 
 }
 
 void X86Dialog::setImportAddressSavePoint() {
@@ -1017,11 +1086,19 @@ void X86Dialog::skip() {
 }
 
 void X86Dialog::run() {
+   BREAK->setEnabled(true);
    ::run();
+   BREAK->setEnabled(false);
+}
+
+void X86Dialog::doBreak() {
+   shouldBreak = 1;
 }
 
 void X86Dialog::runCursor() {
+   BREAK->setEnabled(true);
    ::runToCursor();
+   BREAK->setEnabled(false);
 }
 
 void X86Dialog::jumpCursor() {
@@ -1068,6 +1145,9 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    emulateTrack_fetched_bytesAction->setCheckable(true);
    emulateTrace_executionAction = new QAction("Trace execution", this);
    emulateTrace_executionAction->setCheckable(true);
+   emulateLogLibraryAction = new QAction("Log library calls", this);
+   emulateLogLibraryAction->setCheckable(true);
+   emulateLogLibraryAction->setChecked(doLogLib);
    QAction *emulateWindowsThrow_exceptionMemory_accessAction = new QAction("Memory access", this);
    QAction *emulateWindowsThrow_exceptionBreakpointAction = new QAction("Breakpoint", this);
    QAction *emulateWindowsThrow_exceptionDivide_by_zeroAction = new QAction("Divide by zero", this);
@@ -1075,6 +1155,9 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    QAction *functionsAllocate_heap_blockAction = new QAction("Allocate heap block...", this);
    QAction *functionsAllocate_stack_blockAction = new QAction("Allocate stack block...", this);
    QAction *functionsAllocate_mmap_blockAction = new QAction("Allocate mmap block...", this);
+   QAction *functionsPushMain_argsAction = new QAction("Push main args", this);
+   QAction *functionsPushWinMain_argsAction = new QAction("Push WinMain args", this);
+   QAction *functionsPushDllMain_argsAction = new QAction("Push DllMain args", this);
 
    QEAX = new QLineEdit();
    QEAX->setValidator(&aiv);
@@ -1145,6 +1228,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
 
    QPushButton *SET_MEMORY = new QPushButton("Set Memory");
    QPushButton *RUN = new QPushButton("Run");
+   BREAK = new QPushButton("Break");
    QPushButton *SKIP = new QPushButton("Skip");
    QPushButton *STEP = new QPushButton("Step");
    QPushButton *RUN_TO_CURSOR = new QPushButton("Run to cursor");
@@ -1161,6 +1245,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    gl->addWidget(SKIP, 1, 0);
    gl->addWidget(JUMP_TO_CURSOR, 1, 1);
    gl->addWidget(RUN, 2, 0);
+   gl->addWidget(BREAK, 2, 1);
    gl->addWidget(SEGMENTS, 3, 1);
    gl->addWidget(SET_MEMORY, 4, 0);
    gl->addWidget(PUSH_DATA, 4, 1);
@@ -1189,6 +1274,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    QMenu *popupMenu_13 = new QMenu("Windows", this);
    QMenu *popupMenu_16 = new QMenu("Throw exception", popupMenu_13);
    QMenu *Functions = new QMenu("Functions", this);
+   QMenu *popupMenu_18 = new QMenu("Push", Functions);
 
    addToolBar(toolBar);
       
@@ -1233,6 +1319,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    Emulate->addSeparator();
    Emulate->addAction(emulateTrack_fetched_bytesAction);
    Emulate->addAction(emulateTrace_executionAction);
+   Emulate->addAction(emulateLogLibraryAction);
    popupMenu_13->addAction(emulateWindowsAuto_hookAction);
    popupMenu_13->addAction(emulateWindowsSet_import_addr_save_pointAction);
    popupMenu_13->addAction(popupMenu_16->menuAction());
@@ -1244,10 +1331,15 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    Functions->addAction(functionsAllocate_heap_blockAction);
    Functions->addAction(functionsAllocate_stack_blockAction);
    Functions->addAction(functionsAllocate_mmap_blockAction);
+   Functions->addAction(popupMenu_18->menuAction());
+   popupMenu_18->addAction(functionsPushMain_argsAction);
+   popupMenu_18->addAction(functionsPushWinMain_argsAction);
+   popupMenu_18->addAction(functionsPushDllMain_argsAction);
    
    connect(STEP, SIGNAL(clicked()), this, SLOT(step()));
    connect(SKIP, SIGNAL(clicked()), this, SLOT(skip()));
    connect(RUN, SIGNAL(clicked()), this, SLOT(run()));
+   connect(BREAK, SIGNAL(clicked()), this, SLOT(doBreak()));
    connect(RUN_TO_CURSOR, SIGNAL(clicked()), this, SLOT(runCursor()));
    connect(JUMP_TO_CURSOR, SIGNAL(clicked()), this, SLOT(jumpCursor()));
    connect(SET_MEMORY, SIGNAL(clicked()), this, SLOT(setMemory()));
@@ -1278,10 +1370,14 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    connect(functionsAllocate_stack_blockAction, SIGNAL(triggered()), this, SLOT(grabStackBlock()));
    connect(functionsAllocate_heap_blockAction, SIGNAL(triggered()), this, SLOT(grabHeapBlock()));
    connect(functionsAllocate_mmap_blockAction, SIGNAL(triggered()), this, SLOT(grabMmapBlock()));
+   connect(functionsPushMain_argsAction, SIGNAL(triggered()), this, SLOT(buildMainArgs()));
+   connect(functionsPushWinMain_argsAction, SIGNAL(triggered()), this, SLOT(buildWinMainArgs()));
+   connect(functionsPushDllMain_argsAction, SIGNAL(triggered()), this, SLOT(buildDllMainArgs()));
    connect(viewEnumerate_heapAction, SIGNAL(triggered()), this, SLOT(heapList()));
    connect(viewResetAction, SIGNAL(triggered()), this, SLOT(reset()));
    connect(emulateTrack_fetched_bytesAction, SIGNAL(triggered()), this, SLOT(trackExec()));
    connect(emulateTrace_executionAction, SIGNAL(triggered()), this, SLOT(traceExec()));
+   connect(emulateLogLibraryAction, SIGNAL(triggered()), this, SLOT(logLibraryCalls()));
 
    setWindowTitle("x86 Emulator");
 

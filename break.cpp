@@ -35,7 +35,15 @@ static unsigned int *bp_list = 0;
 static unsigned int count = 0;
 static unsigned int size = 0;
 
+static bool isEmuBreakpoint(unsigned int addr) {
+   for (unsigned int i = 0; i < count; i++) {
+      if (bp_list[i] == addr) return true;
+   }
+   return false;
+}
+
 void addBreakpoint(unsigned int addr) {
+   if (isEmuBreakpoint(addr)) return;
    if (count == size) {
       bp_list = (unsigned int*) realloc(bp_list, (size + 10) * sizeof(unsigned int));
       size += 10;

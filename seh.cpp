@@ -225,7 +225,7 @@ void sehReturn() {
    //so restore them here from ctx values
    cpu.eip = ctx.Eip;
    cpu.eflags = ctx.EFlags;
-   cs = ctx.SegCs;
+   _cs = ctx.SegCs;
    msg("Performing SEH return\n");
    currentVehHandler = 0;
 }
@@ -250,7 +250,7 @@ void vehReturn() {
    //so restore them here from ctx values
    cpu.eip = ctx.Eip;
    cpu.eflags = ctx.EFlags;
-   cs = ctx.SegCs;
+   _cs = ctx.SegCs;
    msg("Performing VEH return\n");
 
    if (res == EXCEPTION_CONTINUE_EXECUTION) {

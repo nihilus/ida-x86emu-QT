@@ -76,6 +76,8 @@
 #include "memmgr.h"
 #include "buffer.h"
 
+#define f_PDF 0x4444
+
 void memoryAccessException();
 
 #if IDA_SDK_VERSION >= 530
@@ -155,7 +157,7 @@ bool cpuInit = false;
 //functions to create header segments and load header bytes
 //from original binary into Ida database.
 dword PELoadHeaders(void);
-void ELFLoadHeaders(void);
+dword ELFLoadHeaders(void);
 
 PETables pe;
 
@@ -169,6 +171,8 @@ static char **mainArgs;
 bool doTrace = false;
 FILE *traceFile = NULL;
 bool doTrack = false;
+
+bool doLogLib = true;
 
 bool idpHooked = false;
 bool idbHooked = false;
@@ -190,7 +194,7 @@ static int idaapi idpCallback(void * cookie, int code, va_list va);
 void getRandomBytes(void *buf, unsigned int len) {
 #ifdef __NT__
    if (hProv == 0) {
-      CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, 0);
+      CryptAcquireContext(&hProv, NULL, MS_DEF_PROV, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_SILENT);
    }
    CryptGenRandom(hProv, len, (BYTE*)buf);
 #else
@@ -247,6 +251,14 @@ void setTracking(bool track) {
 
 bool getTracking() {
    return doTrack;
+}
+
+bool logLibrary() {
+   return doLogLib;
+}
+
+void setLogLibrary(bool log) {
+   doLogLib = log;
 }
 
 void setTracing(bool trace) {
@@ -648,12 +660,14 @@ void generateArgList(const char *func, argcallback_t cb, void *user) {
  * This function is used for all unemulated API functions
  */
 void EmuUnemulatedCB(dword addr, const char *name) {
+#ifdef DEBUG
    static char format[] = "%s called (0x%8.8x) without an emulation. Check your stack layout!";
    int len = sizeof(format) + (name ? strlen(name) : 3) + 20;
-   char *mesg = (char*) malloc(len);
+   char *mesg = (char*) qalloc(len);
    ::qsnprintf(mesg, len, format, name ? name : "???", addr);
    msg("x86emu: %s\n", mesg);
-   free(mesg);
+   qfree(mesg);
+#endif
    restoreCursor();
    handleUnemulatedFunction(addr, name);
    shouldBreak = 1;
@@ -828,6 +842,9 @@ void traceOne() {
    }
 }
 
+//let the emulator run
+//only stops when it hist a breakpoint or when 
+//signaled to break
 void run() {
    ThreadNode *currThread = activeThread;
    codeCheck();
@@ -942,9 +959,11 @@ static void loadBaseCommon() {
       //or detect what is already loaded
       init_til("gnuunx.til");
    }      
+   else if (inf.filetype == f_PDF) {
+      peImageBase = 0x400000;
+      init_til("mssdk.til");
+   }
 
-   register_funcs();
-   
    setUnemulatedCB(EmuUnemulatedCB);
 
    if (idpHooked) {
@@ -1085,7 +1104,6 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
    }
    return 0;
 }
-
 
 void dumpHeap() {
    const MallocNode *n = HeapBase::getHeap()->heapHead();
@@ -1351,12 +1369,12 @@ dword PELoadHeaders() {
 
 #define ELF_MAGIC 0x464C457F  //"\x7FELF"
 
-void ELFLoadHeaders() {
+dword ELFLoadHeaders() {
    segment_t s;
    dword addr = inf.minEA;
    if (get_long(addr) == ELF_MAGIC) {
       //header is already present
-      return;
+      return addr;
    }
    dword base_addr = addr & 0xFFFFF000;
    if (addr == base_addr) {
@@ -1396,6 +1414,7 @@ void ELFLoadHeaders() {
       free(buf);
       fclose(f);
    }
+   return base_addr;
 }
 
 void initListEntry(dword le) {
@@ -1463,14 +1482,35 @@ const char *win_xp_env[] = {
    NULL
 };
 
+const char *linux_env[] = {
+   "HOSTNAME=$HOST",
+   "TERM=vt100",
+   "SHELL=/bin/bash",
+   "HISTSIZE=1000",
+   "USER=$USER",
+   "MAIL=/var/spool/mail/$USER",
+   "PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin",
+   "PWD=/home/$USER",
+   "LANG=en_US.UTF-8",
+   "HISTCONTROL=ignoredups",
+   "SHLVL=1",
+   "HOME=/home/$USER",
+   "LOGNAME=$USER",
+   "LESSOPEN=|/usr/bin/lesspipe.sh %s",
+   "G_BROKEN_FILENAMES=1",
+   "OLDPWD=/tmp",
+   NULL
+};
+
 //var must have been allocated using qalloc
 char *replace(char *var, const char *match, const char *sub) {
    char *res, *find;
    while ((find = strstr(var, match)) != NULL) {
       *find = 0;
-      int len = strlen(var) + strlen(sub) - strlen(match) + 1;
+      find += strlen(match);
+      int len = strlen(var) + strlen(sub) + strlen(find) + 1;
       res = (char*)qalloc(len);
-      ::qsnprintf(res, len, "%s%s%s", var, sub, find + strlen(match));
+      ::qsnprintf(res, len, "%s%s%s", var, sub, find);
       qfree(var);
       var = res;
    }
@@ -1496,6 +1536,18 @@ Buffer *makeEnv(const char *env[], const char *userName, const char *hostName) {
       qfree(ev);
    }
    res->write("", 1);
+   return res;
+}
+
+Buffer *makeLinuxEnv(const char *env[], const char *userName, const char *hostName) {
+   Buffer *res = new Buffer();
+   for (int i = 0; env[i]; i++) {
+      char *ev = ::qstrdup(env[i]);
+      ev = replace(ev, "$USER", userName);
+      ev = replace(ev, "$HOST", hostName);
+      res->write(ev, strlen(ev) + 1);
+      qfree(ev);
+   }
    return res;
 }
 
@@ -1553,19 +1605,12 @@ void createWindowsStack(dword /*top*/, dword /*size*/) {
    dword base = esp - 0x4000;
    MemMgr::mmap(base, 0x4000, 0, 0, ".stack");
    formatStack(base, esp);
+
+/*
    for (int i = 0; i < 16; i++) {
       push(0, SIZE_DWORD);
    }
-   //points to return address from which our entry point
-   //was called
-   //if entry is a tls callback, this is in ntdll.dll
-   //which will go on to call into to the actual entry point
-   //otherwise this is in kernel32.dll where
-   //RtlExitUserThread gets called
-   dword k32 = myGetModuleHandle("kernel32.dll");
-   //need a reliable way to determine the offset into kernel32
-   //could just use the address of TerminateProcess
-   push(0x16fd7 + k32, SIZE_DWORD);
+*/
 }
 
 //possible modify to use CreateThread code for initial thread
@@ -1663,17 +1708,45 @@ void createWindowsTEB(dword peb) {
    patch_long(fsBase + TEB_PROCESS_ID, pid);
    patch_long(fsBase + TEB_THREAD_ID, tid);
 
-   patch_long(fsBase, fsBase + 0xf80);  //last chance SEH record
-   patch_long(fsBase + 0xf80, 0xffffffff);  //end of SEH list
-   //need kernel32.dll mapped prior to this
-   patch_long(fsBase + 0xf84, myGetProcAddress(myGetModuleHandle("kernel32.dll"), "UnhandledExceptionFilter"));  //kernel32 exception handler
-
    patch_long(fsBase + TEB_LINEAR_ADDR, fsBase);  //teb self pointer
    patch_long(fsBase + TEB_PEB_PTR, ebx);     //peb self pointer   
    
    createWindowsStack(0x130000, 0x4000);
    patch_long(fsBase + TEB_STACK_TOP, 0x130000);     //top of stack   
    patch_long(fsBase + TEB_STACK_BOTTOM, 0x130000 - 0x4000);     //bottom of stack   
+
+   push(0, SIZE_DWORD);
+   push(nt.OptionalHeader.AddressOfEntryPoint + nt.OptionalHeader.ImageBase, SIZE_DWORD);
+   push(0, SIZE_DWORD);
+   push(0, SIZE_DWORD);
+   push(0, SIZE_DWORD);
+
+   //need kernel32.dll mapped prior to this
+   dword k32 = myGetModuleHandle("kernel32.dll");
+   push(k32, SIZE_DWORD);  //this should point into kernel32 somewhere
+
+   //last chance exception handler
+   push(myGetProcAddress(k32, "UnhandledExceptionFilter"), SIZE_DWORD);  //kernel32 exception handler
+   push(0xffffffff, SIZE_DWORD);  //end of SEH list
+
+   patch_long(fsBase, esp);  //last chance SEH record
+
+   push(0, SIZE_DWORD);        //?????
+   push(esp - 0x14, SIZE_DWORD);
+   push(0, SIZE_DWORD);        //?????
+   push(peb, SIZE_DWORD);        //?????
+   push(0, SIZE_DWORD);
+   push(0, SIZE_DWORD);        //?????
+
+   //points to return address from which our entry point
+   //was called
+   //if entry is a tls callback, this is in ntdll.dll
+   //which will go on to call into to the actual entry point
+   //otherwise this is in kernel32.dll where
+   //RtlExitUserThread gets called
+   //need a reliable way to determine the offset into kernel32
+   //could just use the address of TerminateProcess
+   push(0x16fd7 + k32, SIZE_DWORD);
    
 //   msg("teb created\n");
 }
@@ -1683,7 +1756,28 @@ void createWindowsProcess() {
    createWindowsTEB(peb);
 }
 
-void buildMainArgs() {
+void buildWinMainArgs() {
+   push(_SW_SHOW, SIZE_DWORD);     //nCmdShow
+   push(pCmdLineA, SIZE_DWORD);    //lpCmdLine
+   push(0, SIZE_DWORD);            //hPrevInstance
+   push(peImageBase, SIZE_DWORD);  //hInstance
+   push(0xbadf00d, SIZE_DWORD);  //dummy return address
+   syncDisplay();
+}
+
+void buildDllMainArgs() {
+   push(0, SIZE_DWORD);            //lpvReserved
+   push(_DLL_PROCESS_ATTACH, SIZE_DWORD);            //fdwReason
+   push(peImageBase, SIZE_DWORD);  //hinstDLL
+   push(0xbadf00d, SIZE_DWORD);  //dummy return address
+   syncDisplay();
+}
+
+void buildPEMainArgs() {
+   syncDisplay();
+}
+
+void buildElfMainArgs() {
    dword envp;
    dword argv;
    int argc = 0;
@@ -1736,6 +1830,17 @@ void buildMainArgs() {
    push(argc, SIZE_DWORD);
    
    //push address in start for main to return to
+   push(0xbadf00d, SIZE_DWORD);  //dummy return address
+   syncDisplay();
+}
+
+void buildMainArgs() {
+   if (inf.filetype == f_PE) {
+      buildPEMainArgs();
+   }
+   else if (inf.filetype == f_ELF) {
+      buildElfMainArgs();
+   }
 }
 
 void parseMainArgs() {
@@ -1779,8 +1884,9 @@ void buildElfArgs() {
    esp &= 0xFFFFFFFC;
 }
 
-void buildElfEnvironment() {
+void buildElfEnvironment(dword elf_base) {
    char buf[260], *fname;
+   char path[260];
 #if (IDA_SDK_VERSION < 490)
    fname = get_input_file_path();
 #else
@@ -1788,17 +1894,162 @@ void buildElfEnvironment() {
    get_root_filename(buf, sizeof(buf));
    fname = buf;
 #endif
+   //build environment
+   const char *userName = "test";
+   const char *hostName = "localhost";
+   Buffer *env = makeLinuxEnv(linux_env, userName, hostName);
+   unsigned int env_len = env->get_wlen();
+   char *eb = (char*)env->get_buf();
+   //find PWD
+   char *pwd = NULL;
+   for (unsigned int i = 0; i < (env_len - 4); i++) {
+      if (strncmp(eb + i, "PWD=", 4) == 0) {
+         pwd = eb + i + 4;
+         break;
+      }
+   }
+   if (pwd) {
+      ::qsnprintf(path, sizeof(path), "%s/%s", pwd, fname);
+      fname = path;
+   }
+
    push(0, SIZE_DWORD);
    int len = strlen(fname) + 1;
-   put_many_bytes(esp - len, fname, len);
    esp -= len;
-   put_many_bytes(esp - 2, "_=", 2);
+   dword fileName = esp;
+   put_many_bytes(esp, fname, len);
    esp -= 2;
+   put_many_bytes(esp, "_=", 2);
+
    //add other environment strings
+   esp -= env_len;
+   put_many_bytes(esp, eb, env_len);
    elfEnvStart = esp;
+   
+   //add argument strings, for now only exe name
+   dword argc = 1;
+   esp -= len;
+   put_many_bytes(esp, fname, len);
+   elfArgStart = esp;
+   
    esp &= 0xFFFFFFFC;
    
    //need to create elf tables in here as well
+
+   esp -= 5;
+   put_many_bytes(esp, "i686", 5);
+   
+   dword platform = esp;
+
+   unsigned char rbytes[16];
+   getRandomBytes(rbytes, 16);
+   esp -= 16;
+   put_many_bytes(esp, rbytes, 16);    //AT_RANDOM
+   dword random = esp;
+
+   esp &= 0xfffffffc;
+
+   push(0, SIZE_DWORD);
+   push(0, SIZE_DWORD);
+   push(0, SIZE_DWORD);
+   push(0, SIZE_DWORD);
+
+   push(platform, SIZE_DWORD);
+   push(AT_PLATFORM, SIZE_DWORD);
+
+   push(fileName, SIZE_DWORD);
+   push(AT_EXECFN, SIZE_DWORD);
+
+   push(random, SIZE_DWORD);
+   push(AT_RANDOM, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);
+   push(AT_SECURE, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);   //need beter gid
+   push(AT_EGID, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);   //need better gid
+   push(AT_GID, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);   //need better uid
+   push(AT_EUID, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);   //need better uid
+   push(AT_UID, SIZE_DWORD);
+
+   push(get_name_ea(BADADDR, "start"), SIZE_DWORD);
+   push(AT_ENTRY, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);
+   push(AT_FLAGS, SIZE_DWORD);
+
+   push(0, SIZE_DWORD);
+   push(AT_BASE, SIZE_DWORD);
+
+   push(get_word(elf_base + 44), SIZE_DWORD);
+   push(AT_PHNUM, SIZE_DWORD);
+
+   push(get_word(elf_base + 42), SIZE_DWORD);
+   push(AT_PHENT, SIZE_DWORD);
+
+   push(get_word(elf_base + 28) + elf_base, SIZE_DWORD);
+   push(AT_PHDR, SIZE_DWORD);
+
+   push(100, SIZE_DWORD);
+   push(AT_CLKTCK, SIZE_DWORD);
+
+   push(0x1000, SIZE_DWORD);
+   push(AT_PAGESZ, SIZE_DWORD);
+
+   push(0x0183f1ff, SIZE_DWORD);
+   push(AT_HWCAP, SIZE_DWORD);
+
+   push(0x110000, SIZE_DWORD); //((unsigned long)current->mm->context.vdso)
+   push(AT_SYSINFO_EHDR, SIZE_DWORD);  //VDSO_CURRENT_BASE
+
+   push(0x110414, SIZE_DWORD);   //((unsigned long)VDSO32_SYMBOL(VDSO_CURRENT_BASE, vsyscall))
+   push(AT_SYSINFO, SIZE_DWORD);  //VDSO_ENTRY
+
+   //end elf interpreter setup
+
+   push(0, SIZE_DWORD);
+   //push envp
+   dword envc = 0;
+   dword loc = elfEnvStart;
+   while (get_byte(loc)) {
+      envc++;
+      while (get_byte(loc++));
+      loc++;
+   }
+   esp -= 4 * envc;
+   envc = 0;
+   loc = elfEnvStart;
+   while (get_byte(loc)) {
+      writeDword(esp + envc * 4, loc);
+      envc++;
+      while (get_byte(loc++));
+   }
+   delete env;
+
+   push(0, SIZE_DWORD);  //NULL termiante argv
+   //push argv
+   loc = elfArgStart;
+   argc = 0;
+   while (loc < elfEnvStart) {
+      argc++;
+      while (get_byte(loc++));
+   }
+   esp -= 4 * argc;
+   argc = 0;
+   loc = elfArgStart;
+   while (loc < elfEnvStart) {
+      writeDword(esp + argc * 4, loc);
+      argc++;
+      while (get_byte(loc++));
+   }
+   
+   push(argc, SIZE_DWORD);      
 }
 
 void createElfStack() {
@@ -1868,10 +2119,10 @@ void idaapi term(void) {
       close(hProv);
 #endif
    }
-   unregister_funcs();
    if (uiHooked) {
       unhook_from_notification_point(HT_UI, uiCallback, NULL);
       uiHooked = false;
+      unregister_funcs();
    }
    if (idpHooked) {
       idpHooked = false;
@@ -1887,6 +2138,7 @@ void idaapi term(void) {
    closeTrace();
    doTrace = false;
    doTrack = false;
+   doLogLib = false;
 #ifdef DEBUG
    msg(PLUGIN_NAME": term exiting\n");
 #endif   
@@ -1949,7 +2201,7 @@ void idaapi run(int /*arg*/) {
          t[5] &= 3;              //truncate time somewhat
 
          kernel_node.create(kernel_node_name);
-         if (inf.filetype == f_PE) {
+         if (inf.filetype == f_PE || inf.filetype == f_PDF) {
             //need to allow this to be user selectable at some point
             os_personality = PERS_WINDOWS_XP;
             
@@ -1992,7 +2244,7 @@ void idaapi run(int /*arg*/) {
       //for ELF differs for Linux vs FreeBSD
       //create personality, heap, peb, teb
       //choose CPUID features regardless of file type
-      
+      dword elf_base = 0;
       if (inf.filetype == f_PE && !netnode_exist(petable_node)) {
          //init some PE specific stuff
          dword headerBase = PELoadHeaders();
@@ -2018,7 +2270,11 @@ void idaapi run(int /*arg*/) {
       }
       else if (inf.filetype == f_ELF) {
          //init some ELF specific stuff
-         ELFLoadHeaders();
+         elf_base = ELFLoadHeaders();
+      }
+      else if (inf.filetype == f_PDF) {
+         peImageBase = 0x400000;
+         createWindowsProcess();
       }
       if (!cpuInit) {
          dword init_eip = get_screen_ea();
@@ -2026,12 +2282,12 @@ void idaapi run(int /*arg*/) {
          dword idtLimit = 0x800;
          dword gdtBase = 0;
          dword gdtLimit = 0x400;
-         if (inf.filetype == f_PE) {
+         if (inf.filetype == f_PE || inf.filetype == f_PDF) {
             enableSEH();
             //typical values for Windows XP segment registers
-            es = ss = ds = 0x23;   //0x167 for win98
-            cs = 0x1b;             //0x15F for win98
-            fs = 0x38;             //0xE1F for win98
+            _es = _ss = _ds = 0x23;   //0x167 for win98
+            _cs = 0x1b;             //0x15F for win98
+            _fs = 0x38;             //0xE1F for win98
             esi = 0xffffffff;
             ecx = esp - 0x14;
             ebp = 0x12fff0;
@@ -2048,14 +2304,14 @@ void idaapi run(int /*arg*/) {
             //need to properly handle brk and heap creation
 //            createElfHeap();   //do this first so it goes right after exe
             createElfStack();
-            buildElfEnvironment();
+            buildElfEnvironment(elf_base);
             //create initial thread
             threadList = activeThread = new ThreadNode();
 
-            es = ss = ds = 0x7b;
-            cs = 0x73;
-            fs = 0;
-            gs = 0;
+            _es = _ss = _ds = 0x7b;
+            _cs = 0x73;
+            _fs = 0;
+            _gs = 0;
 
             cpu.eflags |= 0x3000;  //ring 3
 
@@ -2090,7 +2346,9 @@ void idaapi run(int /*arg*/) {
    if (!uiHooked) {
       uiHooked = true;
       hook_to_notification_point(HT_UI, uiCallback, NULL);
+      register_funcs();
    }
+   
 }
 
 //--------------------------------------------------------------------------

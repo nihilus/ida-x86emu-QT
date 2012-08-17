@@ -137,7 +137,7 @@ void fpuInit() {
 
 void fpuSetPointers(unsigned int data, unsigned short opcode) {
    fpu.lastIP = fpuStart;
-   fpu.lastIPseg = cs;
+   fpu.lastIPseg = _cs;
    fpu.lastDataPointer = data;
    fpu.lastDataSeg = segmentReg;
    fpu.opcode = opcode & 0x7FF;
@@ -273,7 +273,7 @@ void fpuStoreEnv(unsigned int addr) {
 void setInterruptGate(dword base, dword interrupt_number,
                       dword segment, dword handler) {
    segmentBase = dsBase;
-   segmentReg = ds;
+   segmentReg = _ds;
    interrupt_number *= 8;
    writeMem(base + interrupt_number, handler, SIZE_WORD);
    writeMem(base + interrupt_number + 6, handler >> 16, SIZE_WORD);
@@ -285,13 +285,13 @@ void initIDTR(dword idtBase, dword idtLimit) {
    cpu.idtr.base = idtBase;
    cpu.idtr.limit = idtLimit;
    if (usingSEH()) {
-      setInterruptGate(cpu.idtr.base, 0, cs, SEH_MAGIC);
-      setInterruptGate(cpu.idtr.base, 1, cs, SEH_MAGIC);
-      setInterruptGate(cpu.idtr.base, 3, cs, SEH_MAGIC);
-      setInterruptGate(cpu.idtr.base, 6, cs, SEH_MAGIC);
+      setInterruptGate(cpu.idtr.base, 0, _cs, SEH_MAGIC);
+      setInterruptGate(cpu.idtr.base, 1, _cs, SEH_MAGIC);
+      setInterruptGate(cpu.idtr.base, 3, _cs, SEH_MAGIC);
+      setInterruptGate(cpu.idtr.base, 6, _cs, SEH_MAGIC);
    }
    else {
-      setInterruptGate(cpu.idtr.base, 0x80, cs, INTx80_MAGIC);
+      setInterruptGate(cpu.idtr.base, 0x80, _cs, INTx80_MAGIC);
    }
 }
 
@@ -586,7 +586,7 @@ void resetCpu() {
    cpu.eflags = xIF | 2;
    cpu.gdtr.base = cpu.idtr.base = 0;
    cpu.gdtr.limit = cpu.idtr.limit = 0xFFFF;
-   cs = 0xF000;  //base = 0xFFFF0000, limit = 0xFFFF
+   _cs = 0xF000;  //base = 0xFFFF0000, limit = 0xFFFF
    cr0 = 0x60000010;
    tsc.ll = 0;
    fpu.tag  = 0xFFFF;
@@ -741,14 +741,14 @@ dword writeBuffer(dword addr, void *buf, dword nbytes) {
 
 void push(dword val, byte size) {
    segmentBase = ssBase;
-   segmentReg = ss;
+   segmentReg = _ss;
    esp -= size;
    writeMem(esp, val, size);
 }
 
 dword pop(byte size) {
    segmentBase = ssBase;
-   segmentReg = ss;
+   segmentReg = _ss;
    dword result = readMem(esp, size);
    esp += size;
    return result;
@@ -760,7 +760,7 @@ void doInterruptReturn() {
          pop(SIZE_DWORD);  //pop the saved error code
       }
       cpu.eip = pop(SIZE_DWORD);
-      cs = pop(SIZE_DWORD);
+      _cs = pop(SIZE_DWORD);
       cpu.eflags = pop(SIZE_DWORD);
       IntrRecord *temp = intrList;
       intrList = intrList->next;
@@ -773,10 +773,11 @@ void initiateInterrupt(dword interrupt_number, dword saved_eip) {
    //need to pick segment reg value out of table as well
    dword handler = readMem(table, SIZE_WORD);
    handler |= (readMem(table + 6, SIZE_WORD) << 16);
+   shouldBreak = 1;
    if (handler) {
       msg("x86emu: Initiating INT %d processing w/ handler %x\n", interrupt_number, handler);
       push(cpu.eflags, SIZE_DWORD);
-      push(cs, SIZE_DWORD);
+      push(_cs, SIZE_DWORD);
       push(saved_eip, SIZE_DWORD);
       //need to push error code if required by interrupt_number
       //need to keep track of nested interrupts so that we know whether to
@@ -793,7 +794,7 @@ void initiateInterrupt(dword interrupt_number, dword saved_eip) {
          //and perform some action
          syscall();
          cpu.eip = pop(SIZE_DWORD);
-         cs = pop(SIZE_DWORD);
+         _cs = pop(SIZE_DWORD);
          cpu.eflags = pop(SIZE_DWORD);
       }
    }
@@ -984,7 +985,7 @@ void setSegment() {
    }
    else {  //? Not always the case
       segmentBase = dsBase;
-      segmentReg = ds;
+      segmentReg = _ds;
    }
 }
 
@@ -1429,13 +1430,13 @@ int doZero() {
    else {
       switch (op) {
          case 0x06:
-            push(es, SIZE_WORD);
+            push(_es, SIZE_WORD);
             break;
          case 0x07:
-            es = pop(SIZE_WORD);
+            _es = pop(SIZE_WORD);
             break;
          case 0x0E:
-            push(cs, SIZE_WORD);
+            push(_cs, SIZE_WORD);
             break;
          case 0x0F:
             return doEscape();
@@ -1463,16 +1464,16 @@ int doOne() {
    else {
       switch (op) {
          case 6:
-            push(ss, SIZE_WORD);
+            push(_ss, SIZE_WORD);
             break;
          case 7:
-            ss = pop(SIZE_WORD);
+            _ss = pop(SIZE_WORD);
             break;
          case 0xE:
-            push(ds, SIZE_WORD);
+            push(_ds, SIZE_WORD);
             break;
          case 0xF:
-            ds = pop(SIZE_WORD);
+            _ds = pop(SIZE_WORD);
             break;
       }
    }
@@ -1677,13 +1678,11 @@ int doSix() {
       case 1: {//POPA/POPAD
          for (int j = EDI; j >= EAX; j--) { //need signed number for this test
             dest.addr = (dword)j;
-            if (dest.addr == ESP) result = pop(opsize);
+            if (dest.addr == ESP) pop(opsize);
             else storeOperand(&dest, pop(opsize));
          }
-         dest.addr = ESP;
-         storeOperand(&dest, result);
          break;
-              }
+      }
       case 2: //BOUND
          break;
       case 3: //ARPL
@@ -1728,7 +1727,7 @@ int doSix() {
          opsize = SIZE_BYTE;
       case 0xD: //INS
          segmentBase = esBase;
-         segmentReg = es;
+         segmentReg = _es;
          if (rep) {
             while (ecx) {
 //               writeMem(edi, eax, opsize);  //we are not really going to write data
@@ -2010,7 +2009,7 @@ int doTen() {
                source.addr = esi;
                dword val = getOperand(&source);
                segmentBase = esBase;
-               segmentReg = es;
+               segmentReg = _es;
                writeMem(edi, val, opsize);
                step(opsize);
                ecx--;        //FAILS to take addr size into account
@@ -2020,7 +2019,7 @@ int doTen() {
             source.addr = esi;
             dword val = getOperand(&source);
             segmentBase = esBase;
-            segmentReg = es;
+            segmentReg = _es;
             writeMem(edi, val, opsize);
             step(opsize);
          }
@@ -2034,7 +2033,7 @@ int doTen() {
                source.addr = esi;
                dword val = getOperand(&source);
                segmentBase = esBase;
-               segmentReg = es;
+               segmentReg = _es;
                cmp(val, readMem(edi, opsize));
                step(opsize);
                ecx--;        //FAILS to take addr size into account
@@ -2046,7 +2045,7 @@ int doTen() {
             source.addr = esi;
             dword val = getOperand(&source);
             segmentBase = esBase;
-            segmentReg = es;
+            segmentReg = _es;
             cmp(val, readMem(edi, opsize));
             step(opsize);
          }
@@ -2062,7 +2061,7 @@ int doTen() {
          opsize = SIZE_BYTE;
       case 0xB: //STOS/STOSW/STOSD
          segmentBase = esBase;
-         segmentReg = es;
+         segmentReg = _es;
          if (rep) {
             while (ecx) {
                writeMem(edi, eax, opsize);
@@ -2101,7 +2100,7 @@ int doTen() {
          opsize = SIZE_BYTE;
       case 0xF: //SCAS/SCASW/SCASD
          segmentBase = esBase;
-         segmentReg = es;
+         segmentReg = _es;
          if (loop) {
             while (ecx) {
                cmp(eax, readMem(edi, opsize));
@@ -2246,6 +2245,7 @@ int doTwelve() {
       case 0xC: case 0xD: case 0xE: //INT 3 = 0xCC, INT Ib, INTO
          if (op == 0xD) subop = fetchu(SIZE_BYTE);  //this is the interrupt vector
          else subop = op == 0xC ? 3 : 4;  //3 == TRAP, 4 = O
+         msg("%02x %02x at 0x%x\n", opcode, subop, cpu.eip);
          initiateInterrupt(subop, cpu.eip);
          break;
       case 0xF: //IRET
@@ -3333,6 +3333,7 @@ int doFifteen() {
             prefix |= PREFIX_LOCK;
             return 0;
          case 1: //0xF1 icebp
+            msg("ICEBP at 0x%x\n", cpu.eip);
             initiateInterrupt(1, cpu.initial_eip);
             break;
          case 2:
@@ -5908,6 +5909,7 @@ int executeInstruction() {
           ((dr7 & 4) && (cpu.eip == dr1)) ||
           ((dr7 & 0x10) && (cpu.eip == dr2)) ||
           ((dr7 & 0x40) && (cpu.eip == dr3))) {
+          msg("hardware breakpoint at 0x%x\n", cpu.eip);
           initiateInterrupt(1, cpu.initial_eip);
          //return from here with update eip as a result of jumping to exception handler
          //otherwise if we fall through first instruction in exception handler gets executed.
@@ -5936,6 +5938,7 @@ int executeInstruction() {
    tsc.ll += 5;
    if (doTrap) {  //trace flag set
       cpu.eflags &= ~xTF;   //clear TRAP flag
+       msg("trace flag set at 0x%x\n", cpu.eip);
       initiateInterrupt(1, cpu.eip);
    }
 //msg("x86emu: end instruction, eip: 0x%x\n", eip);

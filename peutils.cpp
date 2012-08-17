@@ -17,17 +17,17 @@
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
-#ifndef _MSC_VER
+//#ifndef _MSC_VER
 #ifndef USE_DANGEROUS_FUNCTIONS
 #define USE_DANGEROUS_FUNCTIONS 1
 #endif
-#endif
+//#endif
 
-#ifndef _MSC_VER
+//#ifndef _MSC_VER
 #ifndef USE_STANDARD_FILE_FUNCTIONS
 #define USE_STANDARD_FILE_FUNCTIONS 1
 #endif
-#endif
+//#endif
 
 #ifdef __NT__
 #include <windows.h>

@@ -7,7 +7,11 @@ PROC=x86emu
 ifndef __LINUX__
 PLATFORM_CFLAGS=-D__NT__ -D__IDP__ -DWIN32 -DCYGWIN -Os -mno-cygwin -fno-rtti
 PLATFORM_LDFLAGS=--dll -mno-cygwin
-IDALIB=$(shell find ../../.. -type d | grep -E "(lib|lib/)gcc.w32")/ida.a
+LIBDIR=$(shell find ../../../ -type d | grep -E "(lib|lib/)gcc.w32")
+ifeq ($(strip $(LIBDIR)),)
+LIBDIR=../../../lib/x86_win_gcc_32
+endif
+IDALIB=$(LIBDIR)/ida.a
 PLUGIN_EXT=.plw
 RC=windres
 else

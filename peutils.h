@@ -28,6 +28,33 @@ struct _IMAGE_NT_HEADERS;
 struct _IMAGE_SECTION_HEADER;
 struct _IMAGE_EXPORT_DIRECTORY;
 
+//IMAGE_NT_HEADERS.FileHeader.Characteristics dw offset 4 + 0x12 = 0x16 = 22
+//exe will have the following set
+#define _IMAGE_FILE_EXECUTABLE_IMAGE 2
+//dll will have the following set IN ADDITION to _IMAGE_FILE_EXECUTABLE_IMAGE
+#define _IMAGE_FILE_DLL 0x2000
+
+//IMAGE_NT_HEADERS.OptionalHeader.Subsystem dw offset 0x18 + 0x44 = 0x5C = 92
+#define _IMAGE_SUBSYSTEM_WINDOWS_GUI 2
+#define _IMAGE_SUBSYSTEM_WINDOWS_CUI 3
+
+#define _DLL_PROCESS_ATTACH 1
+#define _DLL_PROCESS_DETACH 0
+#define _DLL_THREAD_ATTACH  2
+#define _DLL_THREAD_DETACH  3
+
+#define _SW_HIDE 0
+#define _SW_MAXIMIZE 3
+#define _SW_MINIMIZE 6
+#define _SW_RESTORE 9
+#define _SW_SHOW 5
+#define _SW_SHOWMAXIMIZED 3
+#define _SW_SHOWMINIMIZED 2
+#define _SW_SHOWMINNOACTIVE 7
+#define _SW_SHOWNA 8
+#define _SW_SHOWNOACTIVATE 4
+#define _SW_SHOWNORMAL 1 
+
 struct thunk_rec {
    char *dll_name;
    unsigned int iat_base;  //base VA for iat

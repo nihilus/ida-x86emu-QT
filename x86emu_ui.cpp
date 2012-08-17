@@ -747,6 +747,17 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
                setTracing(!getTracing()); 
                return TRUE;
             }            
+            case IDC_LOGLIB: {
+               HMENU menu = GetMenu(x86Dlg);
+               if (logLibrary()) {
+                  CheckMenuItem(menu, IDC_LOGLIB, MF_BYCOMMAND | MF_UNCHECKED);
+               }
+               else {
+                  CheckMenuItem(menu, IDC_TRACE, MF_BYCOMMAND | MF_CHECKED);
+               }
+               setLogLibrary(!logLibrary()); 
+               return TRUE;
+            }            
             case IDC_GPA: //set a GetProcAddress save point
                tagImportAddressSavePoint();
                return TRUE;
@@ -777,6 +788,18 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
             }
             case IDC_MMAP_BLOCK: {
                grabMmapBlock();
+               return TRUE;
+            }
+            case ID_PUSH_PUSHMAINARGS: {
+               buildMainArgs();
+               return TRUE;
+            }
+            case ID_PUSH_PUSHWINMAINARGS: {
+               buildWinMainArgs();
+               return TRUE;
+            }
+            case ID_PUSH_PUSHDLLMAINARGS: {
+               buildDllMainArgs();
                return TRUE;
             }
          } 

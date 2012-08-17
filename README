@@ -45,7 +45,7 @@ Once Qt has been confugred and built, the plugin can be built.  From the
 plugin's trunk directory, the first step is to create the required makefiles
 using Qt's qmake utility (which should be in your path):
 
-> qmake -o Makefile.msvc collab.pro -platform win32-msvc2008
+> qmake -o Makefile.msvc x86emu.pro -platform win32-msvc2008
 
 Of course you can name the output makefile anything you like and you should
 set the platform option appropriately.

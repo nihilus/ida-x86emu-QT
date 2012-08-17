@@ -941,22 +941,34 @@ void unemulated(dword addr) {
 
 void emu_GetCommandLineA(dword /*addr*/) {
    eax = pCmdLineA;
+   if (doLogLib) {
+      msg("call: GetCommandLineA() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetCommandLineW(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    dword pp = readDword(peb + PEB_PROCESS_PARMS);
    eax = readDword(pp + PARMS_CMD_LINE + 4);
+   if (doLogLib) {
+      msg("call: GetCommandLineW() = 0x%x\n", eax);
+   }
 }
 
 void emu_FreeEnvironmentStringsA(dword /*addr*/) {
    dword env = pop(SIZE_DWORD);
    eax = HeapBase::getHeap()->free(env) ? 1 : 0;
+   if (doLogLib) {
+      msg("call: FreeEnvironmentStringsA(0x%x) = %d\n", env, eax);
+   }
 }
 
 void emu_FreeEnvironmentStringsW(dword /*addr*/) {
-   pop(SIZE_DWORD);
+   dword env = pop(SIZE_DWORD);
    eax = 1;
+   if (doLogLib) {
+      msg("call: FreeEnvironmentStringsW(0x%x) = %d\n", env, eax);
+   }
 }
 
 void emu_GetEnvironmentStringsA(dword /*addr*/) {
@@ -977,18 +989,30 @@ void emu_GetEnvironmentStringsA(dword /*addr*/) {
    for (unsigned int i = 0; i < len; i++) {
       patch_byte(eax + i, get_word(wenv + i * 2));
    }
+   if (doLogLib) {
+      msg("call: GetEnvironmentStringsA() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetEnvironmentStringsW(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    dword pp = readDword(peb + PEB_PROCESS_PARMS);
    eax = readDword(pp + PARMS_ENV_PTR);
+   if (doLogLib) {
+      msg("call: GetEnvironmentStringsW() = 0x%x\n", eax);
+   }
 }
 
 void emu_FlsAlloc(dword addr) {
    //for now this forwards to TlsAlloc
-   pop(SIZE_DWORD);  //discard callback func argument
+   dword arg = pop(SIZE_DWORD);  //discard callback func argument
+   bool bak = doLogLib;
+   doLogLib = false;
    emu_TlsAlloc(addr);
+   if (bak) {
+      msg("call: FlsAlloc(0x%x) = 0x%x\n", arg, eax);
+      doLogLib = true;
+   }
 }
 
 void emu_TlsAlloc(dword /*addr*/) {
@@ -1005,6 +1029,9 @@ void emu_TlsAlloc(dword /*addr*/) {
             writeDword(bitmapPtr, bits);
             eax = i * 32 + j;
             writeDword(fsBase + TEB_TLS_ARRAY + eax * 4, 0);
+            if (doLogLib) {
+               msg("call: TlsAlloc() = 0x%x\n", eax);
+            }
             return;
          }
          bit <<= 1;
@@ -1023,6 +1050,9 @@ void emu_TlsAlloc(dword /*addr*/) {
       //no memory available to allocate expansion page
       eax = 0;
       setThreadError(0xc0000017);
+      if (doLogLib) {
+         msg("call: TlsAlloc() = 0\n");
+      }
       return;
    }
 
@@ -1036,6 +1066,9 @@ void emu_TlsAlloc(dword /*addr*/) {
             eax = i * 32 + j;
             writeDword(exp + eax * 4, 0);
             eax += 64;
+            if (doLogLib) {
+               msg("call: TlsAlloc() = 0x%x\n", eax);
+            }
             return;
          }
          bit <<= 1;
@@ -1045,6 +1078,9 @@ void emu_TlsAlloc(dword /*addr*/) {
    //error code is STATUS_NO_MEMORY == 0xc0000017
    eax = 0xffffffff;   //TLS_OUT_OF_INDEXES
    setThreadError(0xc0000017);
+   if (doLogLib) {
+      msg("call: TlsAlloc() = 0xffffffff\n");
+   }
 }
 
 void emu_TlsFree(dword /*addr*/) {
@@ -1088,6 +1124,9 @@ void emu_TlsFree(dword /*addr*/) {
       //error code is STATUS_INVALID_PARAMETER == 0xc000000d
       setThreadError(0xc000000d);
    }      
+   if (doLogLib) {
+      msg("call: TlsFree(0x%x) = %d\n", dwTlsIndex, eax);
+   }
 }
 
 void emu_TlsGetValue(dword /*addr*/) {
@@ -1111,6 +1150,9 @@ void emu_TlsGetValue(dword /*addr*/) {
       eax = 0;
       setThreadError(0xc000000d);
       //error code is STATUS_INVALID_PARAMETER == 0xc000000d
+   }
+   if (doLogLib) {
+      msg("call: TlsGetValue(0x%x) = 0x%x\n", dwTlsIndex, eax);
    }
 }
 
@@ -1147,15 +1189,24 @@ void emu_TlsSetValue(dword /*addr*/) {
       //error code is STATUS_INVALID_PARAMETER == 0xc000000d
       setThreadError(0xc000000d);
    }
+   if (doLogLib) {
+      msg("call: TlsGetValue(0x%x) = %d\n", dwTlsIndex, lpTlsValue, eax);
+   }
 }
 
 void emu_GetLastError(dword /*addr*/) {
    eax = readDword(fsBase + TEB_LAST_ERROR);
+   if (doLogLib) {
+      msg("call: GetLastError() = 0x%x\n", eax);
+   }
 }
 
 void emu_SetLastError(dword /*addr*/) {
    dword err = pop(SIZE_DWORD);
    setThreadError(err);
+   if (doLogLib) {
+      msg("call: SetLastError(0x%x)\n", err);
+   }
 }
 
 void emu_AddVectoredExceptionHandler(dword /*addr*/) {
@@ -1163,11 +1214,17 @@ void emu_AddVectoredExceptionHandler(dword /*addr*/) {
    dword handler = pop(SIZE_DWORD);
    addVectoredExceptionHandler(first, handler);
    eax = handler;
+   if (doLogLib) {
+      msg("call: AddVectoredExceptionHandler(0x%x, 0x%x)= 0x%x\n", first, handler, eax);
+   }
 }
 
 void emu_RemoveVectoredExceptionHandler(dword /*addr*/) {
    dword handler = pop(SIZE_DWORD);
    removeVectoredExceptionHandler(handler);
+   if (doLogLib) {
+      msg("call: RemoveVectoredExceptionHandler(0x%x)\n", handler, eax);
+   }
 }
 
 static void initCriticalSection(dword lpcs, dword spinCount) {
@@ -1183,6 +1240,9 @@ void emu_InitializeCriticalSection(dword /*addr*/) {
    dword lpCriticalSection = pop(SIZE_DWORD);
    initCriticalSection(lpCriticalSection, 0);
    //add lpCriticalSection to list of active critical sections
+   if (doLogLib) {
+      msg("call: InitializeCriticalSection(0x%x)\n", lpCriticalSection);
+   }
 }
 
 void emu_InitializeCriticalSectionAndSpinCount(dword /*addr*/) {
@@ -1194,6 +1254,9 @@ void emu_InitializeCriticalSectionAndSpinCount(dword /*addr*/) {
    //prior to vista return os 0 for fail, 1 for success
    //vista+ always returns 1
    eax = 1;
+   if (doLogLib) {
+      msg("call: InitializeCriticalSectionAndSpinCount(0x%x, 0x%x) = 0x%x\n", lpCriticalSection, spinCount, eax);
+   }
 }
 
 bool tryEnterCriticalSection(dword /*addr*/) {
@@ -1212,6 +1275,9 @@ bool tryEnterCriticalSection(dword /*addr*/) {
 }
 
 void emu_EnterCriticalSection(dword addr) {
+   if (doLogLib) {
+      msg("call: EnterCriticalSection(0x%x)\n", readDword(esp));
+   }
    bool success = tryEnterCriticalSection(addr);
    if (success) {
    }
@@ -1222,7 +1288,11 @@ void emu_EnterCriticalSection(dword addr) {
 }
 
 void emu_TryEnterCriticalSection(dword addr) {
+   dword arg = readDword(esp);
    eax = tryEnterCriticalSection(addr);
+   if (doLogLib) {
+      msg("call: TryEnterCriticalSection(0x%x) = %d\n", arg, eax);
+   }
 }
 
 void emu_LeaveCriticalSection(dword /*addr*/) {
@@ -1236,47 +1306,72 @@ void emu_LeaveCriticalSection(dword /*addr*/) {
          //see if any threads are blocking on this critical section
       }
    }
+   if (doLogLib) {
+      msg("call: LeaveEnterCriticalSection(0x%x)\n", lpCriticalSection);
+   }
 }
 
 void emu_DeleteCriticalSection(dword /*addr*/) {
-   /*dword lpCriticalSection =*/ pop(SIZE_DWORD); 
+   dword lpCriticalSection = pop(SIZE_DWORD); 
    //remove lpCriticalSection from list of active critical sections
+   if (doLogLib) {
+      msg("call: DeleteCriticalSection(0x%x)\n", lpCriticalSection);
+   }
 }
 
 void emu_Sleep(dword /*addr*/) {
-   /*dword milliSec =*/ pop(SIZE_DWORD);
+   dword milliSec = pop(SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: Sleep(0x%x)\n", milliSec);
+   }
 }
 
 void emu_InterlockedIncrement(dword /*addr*/) {
    dword addend = pop(SIZE_DWORD); 
    eax = readDword(addend) + 1;
    writeDword(addend, eax);
+   if (doLogLib) {
+      msg("call: InterlockedIncrement(0x%x) = 0x%x\n", addend, eax);
+   }
 }
 
 void emu_InterlockedDecrement(dword /*addr*/) {
    dword addend = pop(SIZE_DWORD); 
    eax = readDword(addend) - 1;
    writeDword(addend, eax);
+   if (doLogLib) {
+      msg("call: InterlockedDecrement(0x%x) = 0x%x\n", addend, eax);
+   }
 }
 
 void emu_EncodePointer(dword /*addr*/) {
    dword ptr = pop(SIZE_DWORD);
    eax = ptr ^ randVal;
+   if (doLogLib) {
+      msg("call: EncodePointer(0x%x) = 0x%x\n", ptr, eax);
+   }
 }
 
 void emu_DecodePointer(dword /*addr*/) {
    dword ptr = pop(SIZE_DWORD);
    eax = ptr ^ randVal;
+   if (doLogLib) {
+      msg("call: DecodePointer(0x%x) = 0x%x\n", ptr, eax);
+   }
 }
 
 void emu_lstrlen(unsigned int /*addr*/) {
    dword str = pop(SIZE_DWORD);
+   dword arg = str;
    dword len = 0;
    while (isLoaded(str) && get_byte(str)) {
       len++;
       str++;
    }
    eax = len;
+   if (doLogLib) {
+      msg("call: lstrlen(0x%x) = 0x%x\n", arg, eax);
+   }
 }
 
 void strcpy_common_wide(dword dest, dword src) {
@@ -1294,6 +1389,9 @@ void emu_lstrcpyW(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
    dword src = pop(SIZE_DWORD);
    strcpy_common_wide(eax, src);
+   if (doLogLib) {
+      msg("call: lstrcpyW(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
+   }
 }
 
 void strcpy_common(dword dest, dword src) {
@@ -1309,6 +1407,9 @@ void emu_lstrcpy(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
    dword src = pop(SIZE_DWORD);
    strcpy_common(eax, src);
+   if (doLogLib) {
+      msg("call: lstrcpy(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
+   }
 }
 
 void emu_lstrcat(unsigned int /*addr*/) {
@@ -1318,20 +1419,30 @@ void emu_lstrcat(unsigned int /*addr*/) {
    //move to end of dest
    while (isLoaded(dest) && get_byte(dest)) dest++;
    strcpy_common(dest, src);
+   if (doLogLib) {
+      msg("call: lstrcat(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
+   }
 }
 
 void emu_strcat(unsigned int /*addr*/) {
    dword dest = readDword(esp);
-   eax = readDword(esp);
+   eax = dest;
    dword src = readDword(esp + 4);
    //move to end of dest
    while (isLoaded(dest) && get_byte(dest)) dest++;
    strcpy_common(dest, src);
+   if (doLogLib) {
+      msg("call: strcat(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
+   }
 }
 
 void emu_strcpy(unsigned int /*addr*/) {
    eax = readDword(esp);
-   strcpy_common(eax, readDword(esp + 4));
+   dword src = readDword(esp + 4);
+   strcpy_common(eax, src);
+   if (doLogLib) {
+      msg("call: strcpy(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
+   }
 }
 
 void strncpy_common(dword dest, dword src, dword n) {
@@ -1350,6 +1461,9 @@ void emu_strncpy(unsigned int /*addr*/) {
    dword src = readDword(esp + 4);
    dword n = readDword(esp + 8);
    strncpy_common(eax, src, n);
+   if (doLogLib) {
+      msg("call: strncpy(0x%x, 0x%x) = 0x%x\n", eax, src, n, eax);
+   }
 }
 
 void emu_wcsset(unsigned int /*addr*/) {
@@ -1359,6 +1473,9 @@ void emu_wcsset(unsigned int /*addr*/) {
    while (isLoaded(dest) && get_word(dest)) {
       patch_word(dest, val);
       dest += 2;
+   }
+   if (doLogLib) {
+      msg("call: wcsset(0x%x, 0x%x) = 0x%x\n", eax, val, eax);
    }
 }
 
@@ -1370,44 +1487,70 @@ void emu_strlwr(unsigned int /*addr*/) {
       if (val == 0) break;
       patch_byte(dest++, tolower(val));
    }
+   if (doLogLib) {
+      msg("call: strlwr(0x%x) = 0x%x\n", eax, eax);
+   }
 }
 
 void emu_RevertToSelf(unsigned int /*addr*/) {
    eax = 1;
+   if (doLogLib) {
+      msg("call: RevertToSelf() = 1\n");
+   }
 }
 
 void emu_AreAnyAccessesGranted(unsigned int /*addr*/) {
    eax = 1;
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: AreAnyAccessesGranted(0x%x, 0x%x) = 1\n", arg1, arg2);
+   }
 }
 
 void emu_GetBkMode(unsigned int /*addr*/) {
    eax = 0;
-   pop(SIZE_DWORD);
+   dword arg = pop(SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: AreAnyAccessesGranted(0x%x) = 0\n", arg);
+   }
 }
 
 void emu_GdiFlush(unsigned int /*addr*/) {
    eax = 1;
+   if (doLogLib) {
+      msg("call: GdiFlush() = 1\n");
+   }
 }
 
 void emu_GetROP2(unsigned int /*addr*/) {
    eax = 0;
-   pop(SIZE_DWORD);
+   dword arg = pop(SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: GetROP2(0x%x) = 0\n", arg);
+   }
 }
 
 void emu_GetBkColor(unsigned int /*addr*/) {
    eax = 0;
-   pop(SIZE_DWORD);
+   dword arg = pop(SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: GetBkColor(0x%x) = 0\n", arg);
+   }
 }
 
 void emu_GdiGetBatchLimit(unsigned int /*addr*/) {
    eax = 20;
+   if (doLogLib) {
+      msg("call: GdiGetBatchLimit() = %d\n", eax);
+   }
 }
 
 void emu_StrCmpW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
+   dword arg1 = str1;
    dword str2 = pop(SIZE_DWORD);
+   dword arg2 = str2;
    eax = 1;
    while (isLoaded(str1) && isLoaded(str2)) {
       dword val1 = get_word(str1);
@@ -1424,17 +1567,25 @@ void emu_StrCmpW(unsigned int /*addr*/) {
       str1 += 2;
       str2 += 2;      
    }
+   if (doLogLib) {
+      msg("call: StrCmpW(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_StrSpnA(unsigned int /*addr*/) {
-   /*dword str1 =*/ pop(SIZE_DWORD);
-   /*dword str2 =*/ pop(SIZE_DWORD);
+   dword str1 = pop(SIZE_DWORD);
+   dword str2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: StrSpnA(0x%x, 0x%x) = %d\n", str1, str2, eax);
+   }
 }
 
 void emu_StrCmpIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
+   dword arg1 = str1;
    dword str2 = pop(SIZE_DWORD);
+   dword arg2 = str2;
    eax = 1;
    while (isLoaded(str1) && isLoaded(str2)) {
       dword val1 = towlower(get_word(str1));
@@ -1451,12 +1602,17 @@ void emu_StrCmpIW(unsigned int /*addr*/) {
       str1 += 2;
       str2 += 2;      
    }
+   if (doLogLib) {
+      msg("call: StrCmpIW(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_StrCpyW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
+   dword arg1 = str1;
    dword str2 = pop(SIZE_DWORD);
    eax = str1;
+   dword arg2 = str2;
    while (isLoaded(str2)) {
       dword val1 = get_word(str2);
       patch_word(str1, val1);
@@ -1465,6 +1621,9 @@ void emu_StrCpyW(unsigned int /*addr*/) {
       }
       str1 += 2;
       str2 += 2;      
+   }
+   if (doLogLib) {
+      msg("call: StrCpyW(0x%x, 0x%x) = 0x%x\n", arg1, arg2, eax);
    }
 }
 
@@ -1480,16 +1639,23 @@ void emu_StrChrIA(unsigned int /*addr*/) {
       }
       val = get_byte(++str1);
    }
+   if (doLogLib) {
+      msg("call: StrChrIA(0x%x) = 0x%x\n", str1, eax);
+   }
 }
 
 void emu_StrCSpnIA(unsigned int /*addr*/) {
-   /*dword str1 =*/ pop(SIZE_DWORD);
-   /*dword str2 =*/ pop(SIZE_DWORD);
+   dword str1 = pop(SIZE_DWORD);
+   dword str2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: StrChrIA(0x%x) = %d\n", str1, str2, eax);
+   }
 }
 
 void emu_StrChrIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
+   dword arg1 = str1;
    dword match = towlower(pop(SIZE_DWORD));
    dword val = get_word(str1);
    eax = 0;
@@ -1501,11 +1667,16 @@ void emu_StrChrIW(unsigned int /*addr*/) {
       str1 += 2;
       val = get_word(str1);
    }
+   if (doLogLib) {
+      msg("call: StrChrIW(0x%x) = 0x%x\n", arg1, eax);
+   }
 }
 
 void emu_StrCmpNW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
+   dword arg1 = str1;
    dword str2 = pop(SIZE_DWORD);
+   dword arg2 = str2;
    int n = pop(SIZE_DWORD);
    eax = 0;
    for (int i = 0; i < n && isLoaded(str1) && isLoaded(str2); i++) {
@@ -1522,11 +1693,16 @@ void emu_StrCmpNW(unsigned int /*addr*/) {
       str1 += 2;
       str2 += 2;      
    }
+   if (doLogLib) {
+      msg("call: StrCmpNW(0x%x, 0x%x, %d) = %d\n", arg1, arg2, n, eax);
+   }
 }
 
 void emu_StrCmpNIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
+   dword arg1 = str1;
    dword str2 = pop(SIZE_DWORD);
+   dword arg2 = str2;
    int n = pop(SIZE_DWORD);
    eax = 0;
    for (int i = 0; i < n && isLoaded(str1) && isLoaded(str2); i++) {
@@ -1543,136 +1719,216 @@ void emu_StrCmpNIW(unsigned int /*addr*/) {
       str1 += 2;
       str2 += 2;      
    }
+   if (doLogLib) {
+      msg("call: StrCmpNIW(0x%x, 0x%x, %d) = %d\n", arg1, arg2, n, eax);
+   }
 }
 
 void emu_StrCSpnIW(unsigned int /*addr*/) {
-   /*dword str1 =*/ pop(SIZE_DWORD);
-   /*dword str2 =*/ pop(SIZE_DWORD);
+   dword str1 = pop(SIZE_DWORD);
+   dword str2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: StrCmpNIW(0x%x, 0x%x) = %d\n", str1, str2, eax);
+   }
 }
 
 void emu_GetClientRect(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetClientRect(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_GetACP(unsigned int /*addr*/) {
    eax = 1252;
+   if (doLogLib) {
+      msg("call: GetACP() = %d\n", eax);
+   }
 }
 
 void emu_IsCharUpperA(unsigned int /*addr*/) {
-   eax = isupper(pop(SIZE_DWORD));
+   dword ch = pop(SIZE_DWORD);
+   eax = isupper(ch);
+   if (doLogLib) {
+      msg("call: IsCharUpperA(0x%x) = %d\n", ch, eax);
+   }
 }
 
 void emu_IsCharAlphaA(unsigned int /*addr*/) {
-   eax = isalpha(pop(SIZE_DWORD));
+   dword ch = pop(SIZE_DWORD);
+   eax = isalpha(ch);
+   if (doLogLib) {
+      msg("call: IsCharAlphaA(0x%x) = %d\n", ch, eax);
+   }
 }
 
 void emu_GetIconInfo(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetIconInfo(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_GetWindow(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetWindow(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_IsChild(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: IsChild(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_GetTopWindow(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetTopWindow(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_GetWindowContextHelpId(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetWindowContextHelpId(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_WindowFromDC(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: WindowFromDC(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_GetWindowPlacement(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetWindowPlacement(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_CopyIcon(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: CopyIcon(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_IsIconic(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: IsIconic(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_GetGUIThreadInfo(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetGUIThreadInfo(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_GetDC(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetDC(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_GetTitleBarInfo(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetTitleBarInfo(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_IsWindowUnicode(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: IsWindowUnicode(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_IsMenu(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: IsMenu(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_GetWindowRect(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetWindowRect(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
+   }
 }
 
 void emu_IsWindowVisible(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: IsWindowVisible(0x%x) = %d\n", arg1, eax);
+   }
 }
 
 void emu_GetForegroundWindow(unsigned int /*addr*/) {
    eax = 0x12345678;
+   if (doLogLib) {
+      msg("call: GetForegroundWindow() = 0x%x\n", eax);
+   }
 }
 
 void emu_InSendMessage(unsigned int /*addr*/) {
    eax = 0;
+   if (doLogLib) {
+      msg("call: InSendMessage() = %d\n", eax);
+   }
 }
 
 void emu_GetWindowTextA(unsigned int /*addr*/) {
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
-   pop(SIZE_DWORD);
+   dword arg1 = pop(SIZE_DWORD);
+   dword arg2 = pop(SIZE_DWORD);
+   dword arg3 = pop(SIZE_DWORD);
    eax = 0;
+   if (doLogLib) {
+      msg("call: GetWindowTextA(0x%x, 0x%x, 0x%x) = %d\n", arg1, arg2, arg3, eax);
+   }
 }
 
 void emu_IsUserAnAdmin(unsigned int /*addr*/) {
    eax = 0;
+   if (doLogLib) {
+      msg("call: IsUserAnAdmin() = %d\n", eax);
+   }
 }
 
 #define WINDOWS_XP_MAJOR 5
@@ -1697,14 +1953,23 @@ void emu_GetVersionExA(unsigned int /*addr*/) {
       if (sz == 0x114) { //file in EX related stuff beginning at 0x94
       }
    }
+   if (doLogLib) {
+      msg("call: GetVersionExA(0x%x) = %d\n", ptr, eax);
+   }
 }
 
 void emu_GetVersion(unsigned int /*addr*/) {
    eax = 0xa280105;
+   if (doLogLib) {
+      msg("call: GetVersion() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetTickCount(unsigned int /*addr*/) {
    eax = (dword)(tsc.ll / 1000000);
+   if (doLogLib) {
+      msg("call: GetTickCount() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetSystemTimeAsFileTime(dword /*addr*/) {
@@ -1716,26 +1981,38 @@ void emu_GetSystemTimeAsFileTime(dword /*addr*/) {
    t += time;
    writeDword(lpSystemTimeAsFileTime, tbuf[0]);
    writeDword(lpSystemTimeAsFileTime + 4, tbuf[1]);
+   if (doLogLib) {
+      msg("call: GetSystemTimeAsFileTime(0x%x)\n", lpSystemTimeAsFileTime);
+   }
 }
 
 void emu_QueryPerformanceCounter(dword /*addr*/) {
    dword lpPerformanceCount = pop(SIZE_DWORD);
    writeDword(lpPerformanceCount, tsc.low);
    writeDword(lpPerformanceCount + 4, tsc.high);
+   if (doLogLib) {
+      msg("call: QueryPerformanceCounter(0x%x)\n", lpPerformanceCount);
+   }
 }
 
 void emu_IsDebuggerPresent(dword /*addr*/) {
    dword peb = readDword(fsBase + TEB_PEB_PTR);
    eax = get_byte(peb + 2);
    msg("x86emu: IsDebuggerPresent called\n");
+   if (doLogLib) {
+      msg("call: IsDebuggerPresent() = %d\n", eax);
+   }
 }
 
 void emu_CheckRemoteDebuggerPresent(dword /*addr*/) {
    eax = 1;
-   /*dword hProcess = */pop(SIZE_DWORD);
+   dword hProcess = pop(SIZE_DWORD);
    dword pbDebuggerPresent = pop(SIZE_DWORD);
    writeMem(pbDebuggerPresent, 0, SIZE_DWORD);
    msg("x86emu: CheckRemoteDebuggerPresent called\n");
+   if (doLogLib) {
+      msg("call: CheckRemoteDebuggerPresent(0x%x, 0x%x) = %d\n", hProcess, pbDebuggerPresent, eax);
+   }
 }
 
 void emu_CloseHandle(dword /*addr*/) {
@@ -1752,6 +2029,9 @@ void emu_CloseHandle(dword /*addr*/) {
    }
 */   
    eax = 0;    //always fail for now
+   if (doLogLib) {
+      msg("call: CloseHandle(0x%x) = %d\n", hObject, eax);
+   }
 }
 
 //from winternl.h
@@ -1859,6 +2139,11 @@ void emu_NtQuerySystemInformation(dword /*addr*/) {
          break;
    }
 //   writeMem(pbDebuggerPresent, 0, SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: NtQuerySystemInformation(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", 
+           SystemInformationClass, pSystemInformation, SystemInformationLength, 
+           pReturnLength, eax);
+   }
 }
 
 typedef enum _THREADINFOCLASS {
@@ -1895,6 +2180,11 @@ void emu_NtSetInformationThread(dword /*addr*/) {
       case ThreadHideFromDebugger: {
          break;
       }
+   }
+   if (doLogLib) {
+      msg("call: NtSetInformationThread(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", 
+           ThreadHandle, ThreadInformationClass, pThreadInformation, 
+           ThreadInformationLength, eax);
    }
 }
 
@@ -1950,18 +2240,32 @@ void emu_NtQueryInformationProcess(dword /*addr*/) {
          eax = 0xC0000003;  //STATUS_INVALID_INFO_CLASS
          break;
    }
+   if (doLogLib) {
+      msg("call: NtQueryInformationProcess(0x%x, %d, 0x%x, %d, 0x%x) = 0x%x\n", 
+          ProcessHandle, ProcessInformationClass, pProcessInformation, 
+          ProcessInformationLength, pReturnLength, eax);
+   }
 }
 
 void emu_GetCurrentProcess(dword /*addr*/) {
    eax = 0xffffffff;
+   if (doLogLib) {
+      msg("call: GetCurrentProcess() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetCurrentProcessId(dword /*addr*/) {
    eax = get_long(fsBase + TEB_PROCESS_ID);
+   if (doLogLib) {
+      msg("call: GetCurrentProcessId() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetCurrentThreadId(dword /*addr*/) {
    eax = get_long(fsBase + TEB_THREAD_ID);
+   if (doLogLib) {
+      msg("call: GetCurrentThreadId() = 0x%x\n", eax);
+   }
 }
 
 void emu_GetThreadContext(dword /*addr*/) {
@@ -1979,15 +2283,18 @@ void emu_GetThreadContext(dword /*addr*/) {
    }
    copyContextToMem(&ctx, lpContext);
    eax = 1;    //non-zero on success,  0 on fail
+   if (doLogLib) {
+      msg("call: GetThreadContext(0x%x, 0x%x) = %d\n", hThread, lpContext, eax);
+   }
 }
 
 //need to allocate new TEB here and link to PEB
 void emu_CreateThread(dword /*addr*/) {
-   /*LPSECURITY_ATTRIBUTES lpThreadAttributes = */ pop(SIZE_DWORD);
-   /*SIZE_T dwStackSize = */ pop(SIZE_DWORD);
+   dword lpThreadAttributes = pop(SIZE_DWORD);
+   dword dwStackSize = pop(SIZE_DWORD);
    dword lpStartAddress = pop(SIZE_DWORD);
    dword lpParameter = pop(SIZE_DWORD);
-   /*DWORD dwCreationFlags = */ pop(SIZE_DWORD);
+   dword dwCreationFlags = pop(SIZE_DWORD);
    dword lpThreadId = pop(SIZE_DWORD);
    
    ThreadNode *tn = emu_create_thread(lpStartAddress, lpParameter);
@@ -2019,6 +2326,10 @@ void emu_CreateThread(dword /*addr*/) {
    }
    eax = tn->handle;
    msg("x86emu: CreateThread called: ThreadFunc is 0x%x\n", lpStartAddress);
+   if (doLogLib) {
+      msg("call: CreateThread(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", lpThreadAttributes, 
+          dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId, eax);
+   }
 }
 
 //this is a heap allocation routine that alsow updates a 
@@ -2045,64 +2356,90 @@ dword addHeapCommon(unsigned int maxSize, unsigned int base) {
 void emu_HeapCreate(dword /*addr*/) {
    //need to test PEB_NUM_HEAPS against PEB_MAX_HEAPS ??
    
-   /* DWORD flOptions =*/ pop(SIZE_DWORD); 
-   /* SIZE_T dwInitialSize =*/ pop(SIZE_DWORD);
+   dword flOptions = pop(SIZE_DWORD); 
+   dword dwInitialSize = pop(SIZE_DWORD);
    dword dwMaximumSize = pop(SIZE_DWORD);
    //we are not going to try to do growable heaps here
    if (dwMaximumSize == 0) dwMaximumSize = 0x01000000;
    eax = HeapBase::getHeap()->addHeap(dwMaximumSize);
    //save eax into PEB and update PEB_NUM_HEAPS ??
+   if (doLogLib) {
+      msg("call: HeapCreate(0x%x, 0x%x, 0x%x) = 0x%x\n", flOptions, 
+          dwInitialSize, dwMaximumSize, eax);
+   }
 }
 
 void emu_HeapDestroy(dword /*addr*/) {
    dword hHeap = pop(SIZE_DWORD); 
    eax = HeapBase::getHeap()->destroyHeap(hHeap);
+   if (doLogLib) {
+      msg("call: HeapDestroy(0x%x) = 0x%x\n", hHeap, eax); 
+   }
 }
 
 void emu_GetProcessHeap(dword /*addr*/) {
    eax = HeapBase::getHeap()->getPrimaryHeap();
+   if (doLogLib) {
+      msg("call: GetProcessHeap() = 0x%x\n", eax); 
+   }
 }
 
 void emu_HeapAlloc(dword /*addr*/) {
    dword hHeap = pop(SIZE_DWORD); 
-   /* DWORD dwFlags =*/ pop(SIZE_DWORD);
+   dword dwFlags = pop(SIZE_DWORD);
    dword dwBytes = pop(SIZE_DWORD);
    EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    //are HeapAlloc  blocks zero'ed?
    eax = h ? h->calloc(dwBytes, 1) : 0;
+   if (doLogLib) {
+      msg("call: HeapAlloc(0x%x, 0x%x, 0x%x) = 0x%x\n", hHeap, dwFlags, dwBytes, eax); 
+   }
 }
 
 void emu_HeapFree(dword /*addr*/) {
    dword hHeap = pop(SIZE_DWORD); 
-   /* DWORD dwFlags =*/ pop(SIZE_DWORD);
+   dword dwFlags = pop(SIZE_DWORD);
    dword lpMem = pop(SIZE_DWORD);
    EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    eax = h ? h->free(lpMem) : 0;
+   if (doLogLib) {
+      msg("call: HeapFree(0x%x, 0x%x, 0x%x) = 0x%x\n", hHeap, dwFlags, lpMem, eax); 
+   }
 }
 
 void emu_GlobalAlloc(dword /*addr*/) {
-   /*dword uFlags =*/ pop(SIZE_DWORD); 
+   dword uFlags = pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->calloc(dwSize, 1);
+   if (doLogLib) {
+      msg("call: GlobalAlloc(0x%x, 0x%x) = 0x%x\n", uFlags, dwSize, eax); 
+   }
 }
 
 void emu_GlobalFree(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   eax = p->free(pop(SIZE_DWORD));
+   dword ptr = pop(SIZE_DWORD);
+   eax = p->free(ptr);
+   if (doLogLib) {
+      msg("call: GlobalFree(0x%x) = 0x%x\n", ptr, eax); 
+   }
 }
 
 void emu_GlobalLock(dword /*addr*/) {
    eax = pop(SIZE_DWORD);
+   if (doLogLib) {
+      msg("call: GlobalLock(0x%x) = 0x%x\n", eax, eax); 
+   }
 }
 
 void emu_NtAllocateVirtualMemory(dword /*addr*/) {
-   /*dword procHandle =*/ pop(SIZE_DWORD); 
+   dword procHandle = pop(SIZE_DWORD); 
    dword pBaseAddress = pop(SIZE_DWORD); 
-   /*dword zeroBits =*/ pop(SIZE_DWORD); 
+   dword zeroBits = pop(SIZE_DWORD); 
    dword pRegionSize = pop(SIZE_DWORD);
-   /*dword flAllocationType =*/ pop(SIZE_DWORD);
-   /*dword flProtect =*/ pop(SIZE_DWORD);
+   dword flAllocationType = pop(SIZE_DWORD);
+   dword flProtect = pop(SIZE_DWORD);
    dword rbase = get_long(pBaseAddress);
    dword dwSize = get_long(pRegionSize);
    dword base = rbase & 0xFFFFF000;
@@ -2118,13 +2455,17 @@ void emu_NtAllocateVirtualMemory(dword /*addr*/) {
    patch_long(pBaseAddress, maddr);
    eax = 0;   //NTSTATUS
 //   msg("x86emu: NtVirtualAllocateMemory called: %d bytes allocated at 0x%x\n", dwSize, addr);
+   if (doLogLib) {
+      msg("call: NtAllocateVirtualMemory(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+        procHandle, pBaseAddress, zeroBits, pRegionSize, flAllocationType, flProtect, eax); 
+   }
 }
 
 void emu_VirtualAlloc(dword /*addr*/) {
    dword lpAddress = pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
-   /*dword flAllocationType =*/ pop(SIZE_DWORD);
-   /*dword flProtect =*/ pop(SIZE_DWORD);
+   dword flAllocationType = pop(SIZE_DWORD);
+   dword flProtect = pop(SIZE_DWORD);
    dword base = lpAddress & 0xFFFFF000;
    if (lpAddress) {
       dword end = (lpAddress + dwSize + 0xFFF) & 0xFFFFF000;
@@ -2134,15 +2475,27 @@ void emu_VirtualAlloc(dword /*addr*/) {
       dwSize = (dwSize + 0xFFF) & 0xFFFFF000;
    }
    eax = MemMgr::mmap(base, dwSize, 0, 0);
+#ifdef DEBUG
    msg("x86emu: VirtualAlloc called: %d bytes allocated at 0x%x\n", dwSize, eax);
+#endif
+   if (doLogLib) {
+      msg("call: VirtualAlloc(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+        lpAddress, dwSize, flAllocationType, flProtect, eax); 
+   }
 }
 
 void emu_VirtualFree(dword addr) {
    addr = pop(SIZE_DWORD);
    dword dwSize = pop(SIZE_DWORD);
-   /*dword dwFreeType =*/ pop(SIZE_DWORD);
+   dword dwFreeType = pop(SIZE_DWORD);
    eax = MemMgr::munmap(addr, dwSize);   
+#ifdef DEBUG
    msg("x86emu: VirtualFree(0x%08x, %d) called: 0x%x\n", addr, dwSize, eax);
+#endif
+   if (doLogLib) {
+      msg("call: VirtualFree(0x%x, 0x%x, 0x%x) = 0x%x\n",
+          eax, dwSize, dwFreeType, eax); 
+   }
 }
 
 void emu_VirtualProtect(dword /*addr*/) {
@@ -2150,21 +2503,34 @@ void emu_VirtualProtect(dword /*addr*/) {
    dword dwSize = pop(SIZE_DWORD);
    dword flNewProtect = pop(SIZE_DWORD);
    dword lpflOldProtect = pop(SIZE_DWORD);
+#ifdef DEBUG
    msg("x86emu: VirtualProtect(0x%08x, %d, 0x%x, 0x%08x)\n", 
        lpAddress, dwSize, flNewProtect, lpflOldProtect);
+#endif
    eax = 1;
+   if (doLogLib) {
+      msg("call: VirtualProtect(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+          lpAddress, dwSize, flNewProtect, lpflOldProtect, eax); 
+   }
 }
 
 void emu_LocalAlloc(dword /*addr*/) {
-   /*dword uFlags =*/ pop(SIZE_DWORD); 
+   dword uFlags = pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(dwSize);
+   if (doLogLib) {
+      msg("call: VirtualProtect(0x%x, 0x%x) = 0x%x\n", uFlags, dwSize, eax); 
+   }
 }
 
 void emu_LocalFree(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   eax = p->free(pop(SIZE_DWORD));
+   dword ptr = pop(SIZE_DWORD);
+   eax = p->free(ptr);
+   if (doLogLib) {
+      msg("call: LocalFree(0x%x) = 0x%x\n", ptr, eax); 
+   }
 }
 
 //funcName should be a library function name, and funcAddr its address
@@ -2272,7 +2638,9 @@ void emu_GetProcAddress(dword /*addr*/) {
    eax = myGetProcAddress(hModule, lpProcName);
    HandleList *m = findModuleByHandle(hModule);
    procName = reverseLookupExport(eax);
+#ifdef DEBUG
    msg("x86emu: GetProcAddress called: %s", procName);
+#endif
    //first see if this function is already hooked
    if (procName && findHookByAddr(eax) == NULL) {
       //this is where we need to check if auto hooking is turned on else if (autohook) {
@@ -2294,7 +2662,12 @@ void emu_GetProcAddress(dword /*addr*/) {
    }
    else {
    }
+#ifdef DEBUG
    msg(" (0x%X)\n", eax);
+#endif
+   if (doLogLib) {
+      msg("call: GetProcAddress(0x%x, \"%s\") = 0x%x\n", hModule, procName, eax); 
+   }
    free(procName);
 }
 
@@ -2330,9 +2703,11 @@ HandleList *moduleCommonA(dword /*addr*/) {
    else {
       m = addModule(modName, false, 0);
    }
+#ifdef DEBUG
    if (m) {
       msg(" called: %s (%X)\n", m->moduleName, m->handle);
    }
+#endif
    return m;
 }
 
@@ -2347,9 +2722,11 @@ HandleList *moduleCommonW(dword /*addr*/) {
    else {
       m = addModule(modName, false, 0);
    }
+#ifdef DEBUG
    if (m) {
       msg(" called: %s (%X)\n", m->moduleName, m->handle);
    }
+#endif
    return m;
 }
 
@@ -2373,15 +2750,24 @@ HandleList *moduleCommon(char **modName) {
 
 //HMODULE __stdcall GetModuleHandleA(LPCSTR lpModuleName)
 void emu_GetModuleHandleA(dword addr) {
+#ifdef DEBUG
    msg("x86emu: GetModuleHandle");
-   if (readMem(esp, SIZE_DWORD) == 0) {
+#endif
+   dword arg = readDword(esp);
+   if (arg == 0) {
       dword peb = readDword(fsBase + TEB_PEB_PTR);
       eax = readDword(peb + PEB_IMAGE_BASE);
       pop(SIZE_DWORD);
+      if (doLogLib) {
+         msg("call: GetModuleHandleA(NULL) = 0x%x\n", eax); 
+      }
    }
    else {
       HandleList *m = moduleCommonA(addr);
       eax = m->handle;
+      if (doLogLib) {
+         msg("call: GetModuleHandleA(\"%s\") = 0x%x\n", m->moduleName, eax); 
+      }
    }
 }
 
@@ -2392,17 +2778,23 @@ void emu_GetModuleHandleW(dword addr) {
       dword peb = readDword(fsBase + TEB_PEB_PTR);
       eax = readDword(peb + PEB_IMAGE_BASE);
       pop(SIZE_DWORD);
+      if (doLogLib) {
+         msg("call: GetModuleHandleW(NULL) = 0x%x\n", eax); 
+      }
    }
    else {
       HandleList *m = moduleCommonW(addr);
       eax = m->handle;
+      if (doLogLib) {
+         msg("call: GetModuleHandleW(\"%s\") = 0x%x\n", m->moduleName, eax); 
+      }
    }
 }
 
 void emu_LdrLoadDll(dword /*addr*/) {
    msg("x86emu: LdrLoadDll");
-   /*dword PathToFile =*/ pop(SIZE_DWORD); 
-   /*dword Flags  =*/ pop(SIZE_DWORD); 
+   dword PathToFile = pop(SIZE_DWORD); 
+   dword Flags = pop(SIZE_DWORD); 
    dword pModuleFileName = pop(SIZE_DWORD);   //PUNICODE_STRING
    dword pModuleHandle = pop(SIZE_DWORD);
 
@@ -2417,6 +2809,9 @@ void emu_LdrLoadDll(dword /*addr*/) {
    HandleList *m = moduleCommon(&modName);
    patch_long(pModuleHandle, m->handle);
    eax = 0;
+   if (doLogLib) {
+      msg("call: LdrLoadDll(0x%x, 0x%x, \"%s\", 0x%x) = 0x%x\n", PathToFile, Flags, modName, pModuleHandle, eax); 
+   }
    free(modName);
 }
 
@@ -2440,7 +2835,9 @@ void emu_LdrGetProcedureAddress(dword /*addr*/) {
    }
    HandleList *m = findModuleByHandle(hModule);
    procName = reverseLookupExport(func);
+#ifdef DEBUG
    msg("x86emu: LdrGetProcedureAddress called: %s", procName);
+#endif
    //first see if this function is already hooked
    if (procName && findHookByAddr(func) == NULL) {
       //this is where we need to check if auto hooking is turned on else if (autohook) {
@@ -2462,44 +2859,78 @@ void emu_LdrGetProcedureAddress(dword /*addr*/) {
    }
    else {
    }
+#ifdef DEBUG
    msg(" (0x%X)\n", func);
+#endif
+   eax = func ? 0 : 1;  //need an actual error code here
+   if (doLogLib) {
+      msg("call: LdrGetProcedureAddress(0x%x, \"%s\", 0x%x, 0x%x) = 0x%x\n", 
+          hModule, procName, Ordinal, pFunctionAddress, eax); 
+   }
    free(procName);
    patch_long(pFunctionAddress, func);
-   eax = func ? 0 : 1;  //need an actual error code here
 }
 
 //HMODULE __stdcall LoadLibraryA(LPCSTR lpLibFileName)
 void emu_LoadLibraryA(dword addr) {
+#ifdef DEBUG
    msg("x86emu: LoadLibrary");
+#endif
    HandleList *m = moduleCommonA(addr);
    eax = m->handle;
+   if (doLogLib) {
+      msg("call: LoadLibraryA(\"%s\") = 0x%x\n", m->moduleName , eax); 
+   }
 }
 
 //HMODULE __stdcall LoadLibraryW(LPCSTR lpLibFileName)
 void emu_LoadLibraryW(dword addr) {
+#ifdef DEBUG
    msg("x86emu: LoadLibrary");
+#endif
    HandleList *m = moduleCommonW(addr);
    eax = m->handle;
+   if (doLogLib) {
+      msg("call: LoadLibraryW(\"%s\") = 0x%x\n", m->moduleName, eax); 
+   }
 }
 
 void emu_malloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   eax = p->malloc(readDword(esp));
+   dword sz = readDword(esp);
+   eax = p->malloc(sz);
+   if (doLogLib) {
+      msg("call: malloc(0x%x) = 0x%x\n", sz, eax); 
+   }
 }
 
 void emu_calloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   eax = p->calloc(readDword(esp), readDword(esp + 4));
+   dword sz = readDword(esp);
+   dword nitems = readDword(esp + 4);
+   eax = p->calloc(sz, nitems);
+   if (doLogLib) {
+      msg("call: calloc(0x%x, 0x%x) = 0x%x\n", sz, nitems, eax); 
+   }
 }
 
 void emu_realloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   eax = p->realloc(readDword(esp), readDword(esp + 4));
+   dword ptr = readDword(esp);
+   dword sz = readDword(esp + 4);
+   eax = p->realloc(ptr, sz);
+   if (doLogLib) {
+      msg("call: realloc(0x%x, 0x%x) = 0x%x\n", ptr, sz, eax); 
+   }
 }
 
 void emu_free(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   p->free(readDword(esp));
+   dword ptr = readDword(esp);
+   p->free(ptr);
+   if (doLogLib) {
+      msg("call: free(0x%x) = 0x%x\n", ptr, eax); 
+   }
 }
 
 void doImports(PETables &pe) {
@@ -2757,9 +3188,9 @@ FunctionInfo *getFunctionInfo(const char *name) {
    if (f == NULL) {
       const type_t *type;
       const p_list *fields;
-      msg("calling get_named_type for %s\n", name);
+//      msg("calling get_named_type for %s\n", name);
       if (get_named_type(ti, name, NTF_SYMU, &type, &fields) > 0) {
-         msg("get_named_type returned non-zero for %s\n", name);
+//         msg("get_named_type returned non-zero for %s\n", name);
          f = newFunctionInfo(name);
          getIdaTypeInfo(f);
       }
@@ -2847,22 +3278,28 @@ dword emu_close(dword /*fd*/) {
    return 0;
 }
 
-dword linux_mmap(dword offset) {
-   //edx - prot, esi - flags, edi - fd
-   dword len = ecx;
-   dword base = ebx & 0xFFFFF000;
+dword linux_mmap(dword addr, dword len, dword prot, dword flags, dword fd, dword offset) {
+   dword base = addr & 0xFFFFF000;
    if (base) {
-      dword end = (base + ecx + 0xFFF) & 0xFFFFF000;
+      dword end = (base + len + 0xFFF) & 0xFFFFF000;
       len = end - base;
    }
    else {
       len = (len + 0xFFF) & 0xFFFFF000;
    }
-   dword res = MemMgr::mmap(base, len, edx, esi);
-   if (esi & LINUX_MAP_ANONYMOUS) {
+   dword res = MemMgr::mmap(base, len, prot, flags);
+   if (flags & LINUX_MAP_ANONYMOUS) {
       //mmap'ing a file
    }
    return res;
+}
+
+dword linux_munmap() {
+   dword len = ecx;
+   dword base = ebx & 0xFFFFF000;
+   dword end = (base + ecx + 0xFFF) & 0xFFFFF000;
+   len = end - base;
+   return MemMgr::munmap(base, len);   
 }
 
 void emu_exit_group(dword retval) {
@@ -2916,10 +3353,11 @@ void syscall() {
             case LINUX_SYS_MMAP: //90
                //ebx - addr, ecx - len
                //edx - prot, esi - flags, edi - fd, ebp - offset
-               eax = linux_mmap(ebp);
+               eax = linux_mmap(readDword(ebx), readDword(ebx + 4), readDword(ebx + 8),
+                                readDword(ebx + 12), readDword(ebx + 16), readDword(ebx + 20));
                break;
             case LINUX_SYS_MUNMAP: //91
-               eax = 0;
+               eax = linux_munmap();
                break;
             case LINUX_SYS_MPROTECT:  // 125
                eax = 0;
@@ -2927,7 +3365,7 @@ void syscall() {
             case LINUX_SYS_MMAP2:  //192
                //ebx - addr, ecx - len
                //edx - prot, esi - flags, edi - fd, ebp - offset >> 12
-               eax = linux_mmap(ebp << 12);
+               eax = linux_mmap(ebx, ecx, edx, esi, edi, ebp << 12);
                break;
             case LINUX_SYS_SET_THREAD_AREA: { //243
                dword desc = readDword(ebx);

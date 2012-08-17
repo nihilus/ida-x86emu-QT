@@ -38,6 +38,7 @@ void stepOne();
 void traceOne();
 void emuSyncDisplay();
 void setIdcRegister(dword idc_reg_num, dword newVal);
+void addBreakpoint(dword addr);
 
 /*
  * native implementation of EmuRun.
@@ -164,6 +165,23 @@ static error_t idaapi idc_emu_setreg(idc_value_t *argv, idc_value_t *res) {
 }
 
 /*
+ * native implementation of EmuAddBpt.  Adds an emulator breakpoint
+ * at the specified address.
+ */
+static error_t idaapi idc_emu_addbpt(idc_value_t *argv, idc_value_t *res) {
+   res->vtype = VT_LONG;
+   if (argv[0].vtype == VT_LONG) {
+      dword addr = argv[0].num;
+      addBreakpoint(addr);
+      res->num = 1;
+   }
+   else {
+      res->num = 0;
+   }
+   return eOk;
+}
+
+/*
  * Register new IDC functions for use with the emulator
  */
 void register_funcs() {
@@ -171,6 +189,7 @@ void register_funcs() {
 //   static const char idc_str_args[] = { VT_STR, 0 };
    static const char idc_long[] = { VT_LONG, 0 };
    static const char idc_long_long[] = { VT_LONG, VT_LONG, 0 };
+#if IDA_SDK_VERSION < 570
    set_idc_func("EmuRun", idc_emu_run, idc_void);
    set_idc_func("EmuTrace", idc_emu_trace, idc_void);
    set_idc_func("EmuStepOne", idc_emu_step, idc_void);
@@ -178,12 +197,24 @@ void register_funcs() {
    set_idc_func("EmuSync", idc_emu_sync, idc_void);
    set_idc_func("EmuGetReg", idc_emu_getreg, idc_long);
    set_idc_func("EmuSetReg", idc_emu_setreg, idc_long_long);
+   set_idc_func("EmuAddBpt", idc_emu_addbpt, idc_long);
+#else
+   set_idc_func_ex("EmuRun", idc_emu_run, idc_void, EXTFUN_BASE);
+   set_idc_func_ex("EmuTrace", idc_emu_trace, idc_void, EXTFUN_BASE);
+   set_idc_func_ex("EmuStepOne", idc_emu_step, idc_void, EXTFUN_BASE);
+   set_idc_func_ex("EmuTraceOne", idc_emu_trace_one, idc_void, EXTFUN_BASE);
+   set_idc_func_ex("EmuSync", idc_emu_sync, idc_void, EXTFUN_BASE);
+   set_idc_func_ex("EmuGetReg", idc_emu_getreg, idc_long, EXTFUN_BASE);
+   set_idc_func_ex("EmuSetReg", idc_emu_setreg, idc_long_long, EXTFUN_BASE);
+   set_idc_func_ex("EmuAddBpt", idc_emu_addbpt, idc_long, EXTFUN_BASE);
+#endif
 }
 
 /*
  * Unregister IDC functions when the plugin is unloaded
  */
 void unregister_funcs() {
+#if IDA_SDK_VERSION < 570
    set_idc_func("EmuRun", NULL, NULL);
    set_idc_func("EmuTrace", NULL, NULL);
    set_idc_func("EmuStepOne", NULL, NULL);
@@ -191,4 +222,15 @@ void unregister_funcs() {
    set_idc_func("EmuSync", NULL, NULL);
    set_idc_func("EmuGetReg", NULL, NULL);
    set_idc_func("EmuSetReg", NULL, NULL);
+   set_idc_func("EmuAddBpt", NULL, NULL);
+#else
+   set_idc_func_ex("EmuRun", NULL, NULL, 0);
+   set_idc_func_ex("EmuTrace", NULL, NULL, 0);
+   set_idc_func_ex("EmuStepOne", NULL, NULL, 0);
+   set_idc_func_ex("EmuTraceOne", NULL, NULL, 0);
+   set_idc_func_ex("EmuSync", NULL, NULL, 0);
+   set_idc_func_ex("EmuGetReg", NULL, NULL, 0);
+   set_idc_func_ex("EmuSetReg", NULL, NULL, 0);
+   set_idc_func_ex("EmuAddBpt", NULL, NULL, 0);
+#endif
 }

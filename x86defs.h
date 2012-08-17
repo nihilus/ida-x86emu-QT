@@ -223,12 +223,12 @@ union ll_union {
 #define FS 4
 #define GS 5
 
-#define cs (cpu.segReg[CS])
-#define ss (cpu.segReg[SS])
-#define ds (cpu.segReg[DS])
-#define es (cpu.segReg[ES])
-#define fs (cpu.segReg[FS])
-#define gs (cpu.segReg[GS])
+#define _cs (cpu.segReg[CS])
+#define _ss (cpu.segReg[SS])
+#define _ds (cpu.segReg[DS])
+#define _es (cpu.segReg[ES])
+#define _fs (cpu.segReg[FS])
+#define _gs (cpu.segReg[GS])
 
 #define csBase (cpu.segBase[CS])
 #define ssBase (cpu.segBase[SS])
@@ -370,6 +370,7 @@ void getRandomBytes(void *buf, unsigned int len);
 
 extern bool doTrace;
 extern bool doTrack;
+extern bool doLogLib;
 extern unsigned int randVal;
 
 #define INTx80_MAGIC 0xBABEF00D
@@ -520,12 +521,17 @@ void setTracking(bool track);
 bool getTracking();
 void setTracing(bool trace);
 bool getTracing();
+void setLogLibrary(bool log);
+bool logLibrary();
 void tagImportAddressSavePoint();
 void setBreakpoint();
 void clearBreakpoint();
 void generateMemoryException();
 void doExportLookup();
 void generateArgList(const char *func, argcallback_t cb, void *user);
+void buildMainArgs();
+void buildWinMainArgs();
+void buildDllMainArgs();
 
 #ifdef __NT__
 #define DIR_SEP '\\'

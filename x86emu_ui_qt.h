@@ -69,9 +69,13 @@ public slots:
    void grabStackBlock();
    void grabHeapBlock();
    void grabMmapBlock();
+   void buildMainArgs();
+   void buildWinMainArgs();
+   void buildDllMainArgs();
    void reset();
    void trackExec();
    void traceExec();
+   void logLibraryCalls();
    void setImportAddressSavePoint();
    void setBreak();
    void clearBreak();
@@ -83,6 +87,7 @@ public slots:
    void step();
    void skip();
    void run();
+   void doBreak();
    void runCursor();
    void jumpCursor();
    void pushData();
@@ -103,6 +108,8 @@ public:
 private:
    QAction *emulateTrack_fetched_bytesAction;
    QAction *emulateTrace_executionAction;
+   QAction *emulateLogLibraryAction;
+   QPushButton *BREAK;
 };
 
 class SegmentsDialog : public QDialog {
@@ -145,6 +152,7 @@ class UnemulatedDialog : public QDialog {
 public:
    UnemulatedDialog(QWidget *parent, const char *name, unsigned int addr);
    const char *fname;
+   char *functionCall;
    
 public:
    QRadioButton *is_cdecl;
