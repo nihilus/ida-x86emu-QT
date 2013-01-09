@@ -1190,7 +1190,7 @@ void emu_TlsSetValue(dword /*addr*/) {
       setThreadError(0xc000000d);
    }
    if (doLogLib) {
-      msg("call: TlsGetValue(0x%x) = %d\n", dwTlsIndex, lpTlsValue, eax);
+      msg("call: TlsSetValue(0x%x, 0x%0x)\n", dwTlsIndex, lpTlsValue);
    }
 }
 
@@ -1223,7 +1223,7 @@ void emu_RemoveVectoredExceptionHandler(dword /*addr*/) {
    dword handler = pop(SIZE_DWORD);
    removeVectoredExceptionHandler(handler);
    if (doLogLib) {
-      msg("call: RemoveVectoredExceptionHandler(0x%x)\n", handler, eax);
+      msg("call: RemoveVectoredExceptionHandler(0x%x)\n", handler);
    }
 }
 
@@ -1462,7 +1462,7 @@ void emu_strncpy(unsigned int /*addr*/) {
    dword n = readDword(esp + 8);
    strncpy_common(eax, src, n);
    if (doLogLib) {
-      msg("call: strncpy(0x%x, 0x%x) = 0x%x\n", eax, src, n, eax);
+      msg("call: strncpy(0x%x, 0x%x, %d) = 0x%x\n", eax, src, n);
    }
 }
 
@@ -1649,7 +1649,7 @@ void emu_StrCSpnIA(unsigned int /*addr*/) {
    dword str2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
-      msg("call: StrChrIA(0x%x) = %d\n", str1, str2, eax);
+      msg("call: emu_StrCSpnIA(0x%x, 0x%x)\n", str1, str2);
    }
 }
 
@@ -2067,7 +2067,7 @@ typedef struct _SYSTEM_MODULE {
 
 typedef struct _SYSTEM_MODULE_INFORMATION {
    ULONG ModulesCount;
-   SYSTEM_MODULE Modules[0];
+   SYSTEM_MODULE Modules[1];
 } SYSTEM_MODULE_INFORMATION, *PSYSTEM_MODULE_INFORMATION;
 
 void emu_NtQuerySystemInformation(dword /*addr*/) {
@@ -3331,12 +3331,19 @@ void syscall() {
                break;
             case LINUX_SYS_BRK: { //45
                dword cbrk = kernel_node.altval(OS_LINUX_BRK);
-               segment_t *s = getseg(cbrk - 1);
+//               segment_t *s = getseg(cbrk - 1);
+#if IDA_SDK_VERSION > 520
+               segment_t *s = get_prev_seg(ebx);
+#else
+               segment_t *s = (segment_t *)segs.getn_area(segs.get_prev_area(ebx));
+#endif
                if (ebx && ebx != cbrk) {
                   if (ebx > inf.omaxEA) {
                      dword newbrk = (ebx + 0xfff) & ~0xfff;
                      if (s) {
-                        set_segm_end(cbrk - 1, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
+                        cbrk = s->endEA;
+//                        set_segm_end(cbrk - 1, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
+                        set_segm_end(s->startEA, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
                         if (newbrk > cbrk) {
                            for (dword i = cbrk; i < newbrk; i++) {
                               patch_byte(i, 0);

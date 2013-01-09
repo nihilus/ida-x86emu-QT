@@ -51,7 +51,7 @@
 				Optimization="2"
 				InlineFunctionExpansion="1"
 				AdditionalIncludeDirectories="..\..\..\include"
-				PreprocessorDefinitions="NDEBUG;__IDP__;WIN32;_WINDOWS;_USRDLL;__NT__"
+				PreprocessorDefinitions="NDEBUG;__IDP__;WIN32;_WINDOWS;_USRDLL;__NT__;_CRT_SECURE_NO_WARNINGS"
 				StringPooling="true"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
