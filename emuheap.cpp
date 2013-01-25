@@ -76,8 +76,8 @@ EmuHeap::EmuHeap(unsigned int baseAddr, unsigned int currSize, unsigned int maxS
 EmuHeap::EmuHeap(const char *name, unsigned int maxSize) {
    h = get_segm_by_name(name);
    head = NULL;
-   base = h->startEA;
-   size = h->endEA - base;
+   base = (dword)h->startEA;
+   size = (dword)h->endEA - base;
    max = maxSize + base;
    nextHeap = NULL;
    if (primaryHeap == NULL) {
@@ -440,7 +440,7 @@ void readLegacyHeap(int heapNum, Buffer &bIn, Buffer &bOut, unsigned int num_blo
       }
    }
    segment_t *h = getseg(base);
-   sz = h->endEA - h->startEA;
+   sz = (unsigned int)(h->endEA - h->startEA);
    bOut.write((char*)&sz, sizeof(sz));
    bOut.write((char*)&max, sizeof(max));
    bOut.write(mb.get_buf(), mb.get_wlen());

@@ -496,7 +496,7 @@ bool cmp_c_to_dbuni(char *cstr, dword uni) {
 dword allocatePebUnicode(const char *str) {
    segment_t *s = get_segm_by_name(".peb");
    if (s) { 
-      dword pebEnd = s->endEA;
+      dword pebEnd = (dword)s->endEA;
       dword uni = pebEnd - 8;
       while (get_long(uni + 4)) {
          dword sz = get_word(uni + 2);
@@ -513,13 +513,13 @@ dword allocatePebUnicode(const char *str) {
       }
       return uni;
    }
-   return BADADDR;
+   return (dword)BADADDR;
 }
 
 dword findPebModuleByName(char *name) {
    segment_t *s = get_segm_by_name(".peb");
    if (s) { 
-      dword peb = s->startEA;
+      dword peb = (dword)s->startEA;
       dword pebLdr = get_long(peb + 0xC);
       dword list = pebLdr + 0xC;
       dword blink = list;
@@ -533,14 +533,14 @@ dword findPebModuleByName(char *name) {
          blink = flink;
       }
    }
-   return BADADDR;   
+   return (dword)BADADDR;
 }
 
 void addModuleToPeb(dword handle, const char *name, bool loading) {
    segment_t *s = get_segm_by_name(".peb");
    if (s) { 
 //      msg("adding %s (%x) to PEB\n", name, handle);
-      dword peb = s->startEA;
+      dword peb = (dword)s->startEA;
       dword pebLdr = get_long(peb + 0xC);
       dword modCount = get_long(pebLdr - 4);
 //      msg("modcount is %d\n", modCount);
@@ -1462,7 +1462,7 @@ void emu_strncpy(unsigned int /*addr*/) {
    dword n = readDword(esp + 8);
    strncpy_common(eax, src, n);
    if (doLogLib) {
-      msg("call: strncpy(0x%x, 0x%x, %d) = 0x%x\n", eax, src, n);
+      msg("call: strncpy(0x%x, 0x%x, %d)\n", eax, src, n);
    }
 }
 
@@ -1656,10 +1656,10 @@ void emu_StrCSpnIA(unsigned int /*addr*/) {
 void emu_StrChrIW(unsigned int /*addr*/) {
    dword str1 = pop(SIZE_DWORD);
    dword arg1 = str1;
-   dword match = towlower(pop(SIZE_DWORD));
+   int match = towlower(pop(SIZE_DWORD));
    dword val = get_word(str1);
    eax = 0;
-   while (isLoaded(str1) && val) {
+   while (isLoaded(str1) && val != 0) {
       if (towlower(val) == match) {
          eax = str1;
          break;
@@ -2684,8 +2684,8 @@ void makeImportLabel(dword addr, dword val) {
    char *name = reverseLookupExport(val);
    if (name && !set_name(addr, name, SN_NOCHECK | SN_NOWARN)) { //failed, probably duplicate name
       //undefine old name and retry once
-      dword oldName = get_name_ea(BADADDR, name);
-      if (oldName != BADADDR && del_global_name(oldName)) {
+      dword oldName = (dword)get_name_ea(BADADDR, name);
+      if (oldName != (dword)BADADDR && del_global_name(oldName)) {
          set_name(addr, name, SN_NOCHECK | SN_NOWARN);
       }
    }
@@ -3330,7 +3330,7 @@ void syscall() {
                eax = emu_close(ebx);
                break;
             case LINUX_SYS_BRK: { //45
-               dword cbrk = kernel_node.altval(OS_LINUX_BRK);
+               dword cbrk = (dword)kernel_node.altval(OS_LINUX_BRK);
 //               segment_t *s = getseg(cbrk - 1);
 #if IDA_SDK_VERSION > 520
                segment_t *s = get_prev_seg(ebx);
@@ -3341,7 +3341,7 @@ void syscall() {
                   if (ebx > inf.omaxEA) {
                      dword newbrk = (ebx + 0xfff) & ~0xfff;
                      if (s) {
-                        cbrk = s->endEA;
+                        cbrk = (dword)s->endEA;
 //                        set_segm_end(cbrk - 1, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
                         set_segm_end(s->startEA, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
                         if (newbrk > cbrk) {

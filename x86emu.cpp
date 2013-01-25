@@ -363,10 +363,10 @@ void syncDisplay() {
          b = lastEsp;
       }
       if (b < s->startEA) {
-         b = s->startEA;
+         b = (dword)s->startEA;
       }
       if (e > s->endEA) {
-         e = s->endEA;
+         e = (dword)s->endEA;
       }
       for (dword a = b; a < e; a += 4) {
          dword val = get_long(a);
@@ -543,7 +543,7 @@ void dumpRange() {
 //to a user named file;
 void dumpEmbededPE() {
    char buf[80];
-   dword base = get_screen_ea();
+   dword base = (dword)get_screen_ea();
    if (get_word(base) != 0x5A4D) {   //check for MS-DOS magic
       showErrorMessage("Failed to locate MS-DOS magic value, canceling dump.");
       return;
@@ -739,7 +739,7 @@ void memLoadFile(dword start) {
 //skip the instruction at eip
 void skip() {
    //this relies on IDA's decoding, not our own
-   cpu.eip += get_item_size(cpu.eip);
+   cpu.eip += (dword)get_item_size(cpu.eip);
    syncDisplay();
 }
 
@@ -935,12 +935,12 @@ static int idaapi uiCallback(void * /*cookie*/, int code, va_list /*va*/) {
 
 void setPEimageBase() {
    netnode pe_node("$ PE header");
-   peImageBase = pe_node.altval(0xFFFFFFFE);
+   peImageBase = (dword)pe_node.altval((nodeidx_t)-2);
    
    if (peImageBase == 0) {
       //could not find $ PE header
       segment_t *h = getnseg(0);   //peek at first segment
-      dword addr = h->startEA;
+      dword addr = (dword)h->startEA;
       if (get_word(addr) == DOS_MAGIC) {
          peImageBase = addr;
       }
@@ -1022,7 +1022,7 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
             msg("x86emu: Error restoring x86emu state: %d.\n", loadStatus);
          }
    
-         randVal = x86emu_node.altval(X86_RANDVAL);
+         randVal = (unsigned int)x86emu_node.altval(X86_RANDVAL);
    
          if (randVal == 0) {
             do {
@@ -1031,10 +1031,10 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
             x86emu_node.altset(X86_RANDVAL, randVal);
          }
    
-         baseTime.dwLowDateTime = x86emu_node.altval(SYSTEM_TIME_LOW);
-         baseTime.dwHighDateTime = x86emu_node.altval(SYSTEM_TIME_HIGH);
+         baseTime.dwLowDateTime = (DWORD)x86emu_node.altval(SYSTEM_TIME_LOW);
+         baseTime.dwHighDateTime = (DWORD)x86emu_node.altval(SYSTEM_TIME_HIGH);
          
-         os_personality = x86emu_node.altval(OS_PERSONALITY);
+         os_personality = (unsigned int)x86emu_node.altval(OS_PERSONALITY);
       }
       else {
          msg("x86emu: No saved x86emu state data was found.\n");
@@ -1049,7 +1049,7 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
          if ((buf = (unsigned char *)heap_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
             b = new Buffer(buf, sz);
          }
-         unsigned int heap = x86emu_node.altval(HEAP_PERSONALITY);
+         unsigned int heap = (unsigned int)x86emu_node.altval(HEAP_PERSONALITY);
          switch (heap) {
             case RTL_HEAP:
                break;
@@ -1118,12 +1118,12 @@ void dumpHeap() {
 
 void doReset() {
    resetCpu();
-   cpu.eip = get_screen_ea();
+   cpu.eip = (dword)get_screen_ea();
    syncDisplay();
 }
 
 void jumpToCursor() {
-   cpu.eip = get_screen_ea();
+   cpu.eip = (dword)get_screen_ea();
    syncDisplay();
 }
 
@@ -1131,7 +1131,7 @@ void runToCursor() {
    ThreadNode *currThread = activeThread;
    codeCheck();
    showWaitCursor();
-   dword endAddr = get_screen_ea();
+   dword endAddr = (dword)get_screen_ea();
    //tell the cpu that we want to run free
    shouldBreak = 0;
    while (cpu.eip != endAddr && !shouldBreak) {
@@ -1284,7 +1284,7 @@ dword PELoadHeaders() {
       for (int i = 0; i < nsegs; i++) {
          segment_t *h = getnseg(i);
          if (get_word(h->startEA) == DOS_MAGIC) {
-            addr = h->startEA;
+            addr = (dword)h->startEA;
 //            msg("peImageBase missing, trying %x\n", addr);
             break;
          }
@@ -1337,8 +1337,8 @@ dword PELoadHeaders() {
          IMAGE_DOS_HEADER *dos;
          IMAGE_NT_HEADERS *nt;
          IMAGE_SECTION_HEADER *sect;
-         addr = s.startEA;
-         dword need = s.endEA - addr;
+         addr = (dword)s.startEA;
+         dword need = (dword)s.endEA - addr;
    
          byte *buf = (byte*)malloc(need);
          fread(buf, 1, need, f);
@@ -1371,7 +1371,7 @@ dword PELoadHeaders() {
 
 dword ELFLoadHeaders() {
    segment_t s;
-   dword addr = inf.minEA;
+   dword addr = (dword)inf.minEA;
    if (get_long(addr) == ELF_MAGIC) {
       //header is already present
       return addr;
@@ -1385,8 +1385,8 @@ dword ELFLoadHeaders() {
    if (f) {
       Elf32_Ehdr *elf;
       Elf32_Phdr *phdr;
-      addr = s.startEA;
-      dword need = s.endEA - addr;
+      addr = (dword)s.startEA;
+      dword need = (dword)s.endEA - addr;
 
 #if (IDA_SDK_VERSION < 520)
       tid_t elf_hdr = til2idb(-1, "Elf32_Ehdr");
@@ -1695,7 +1695,7 @@ void createWindowsTEB(dword peb) {
    //allocated in stack fashion at next lower page in memory, skiping peb page
    //is necessary
    ebx = peb;       //peb
-   for (fsBase = 0x7ffdf000; fsBase == peb; fsBase -= 0x1000);   // this is teb address
+   for (fsBase = 0x7ffdf000; fsBase == peb; fsBase -= 0x1000) {}   // this is teb address
    MemMgr::mmap(fsBase, 0x1000, 0, 0, ".teb");
 
    threadList = activeThread = new ThreadNode();
@@ -1785,7 +1785,7 @@ void buildElfMainArgs() {
 
    dword ch = elfEnvStart;
    while (get_byte(ch++)) {
-      while (get_byte(ch++));
+      while (get_byte(ch++)) {}
       envc++;
    }
    push(0, SIZE_DWORD);
@@ -1795,7 +1795,7 @@ void buildElfMainArgs() {
       int i = 0;
       do {
          env[i++] = ch++;
-         while (get_byte(ch++));
+         while (get_byte(ch++)) {}
       } while (get_byte(ch));
       do {
          push(env[--i], SIZE_DWORD);
@@ -1806,7 +1806,7 @@ void buildElfMainArgs() {
 
    ch = elfArgStart;
    while (get_byte(ch++)) {
-      while (get_byte(ch++));
+      while (get_byte(ch++)) {}
       argc++;
    }
    push(0, SIZE_DWORD);
@@ -1816,7 +1816,7 @@ void buildElfMainArgs() {
       int i = 0;
       do {
          args[i++] = ch++;
-         while (get_byte(ch++));
+         while (get_byte(ch++)) {}
       } while (get_byte(ch));
       do {
          push(args[--i], SIZE_DWORD);
@@ -1978,7 +1978,7 @@ void buildElfEnvironment(dword elf_base) {
    push(0, SIZE_DWORD);   //need better uid
    push(AT_UID, SIZE_DWORD);
 
-   push(get_name_ea(BADADDR, "start"), SIZE_DWORD);
+   push((dword)get_name_ea(BADADDR, "start"), SIZE_DWORD);
    push(AT_ENTRY, SIZE_DWORD);
 
    push(0, SIZE_DWORD);
@@ -2019,7 +2019,7 @@ void buildElfEnvironment(dword elf_base) {
    dword loc = elfEnvStart;
    while (get_byte(loc)) {
       envc++;
-      while (get_byte(loc++));
+      while (get_byte(loc++)) {}
       loc++;
    }
    esp -= 4 * envc;
@@ -2028,7 +2028,7 @@ void buildElfEnvironment(dword elf_base) {
    while (get_byte(loc)) {
       writeDword(esp + envc * 4, loc);
       envc++;
-      while (get_byte(loc++));
+      while (get_byte(loc++)) {}
    }
    delete env;
 
@@ -2038,7 +2038,7 @@ void buildElfEnvironment(dword elf_base) {
    argc = 0;
    while (loc < elfEnvStart) {
       argc++;
-      while (get_byte(loc++));
+      while (get_byte(loc++)) {}
    }
    esp -= 4 * argc;
    argc = 0;
@@ -2046,7 +2046,7 @@ void buildElfEnvironment(dword elf_base) {
    while (loc < elfEnvStart) {
       writeDword(esp + argc * 4, loc);
       argc++;
-      while (get_byte(loc++));
+      while (get_byte(loc++)) {}
    }
    
    push(argc, SIZE_DWORD);      
@@ -2169,8 +2169,8 @@ void idaapi run(int /*arg*/) {
 
          segment_t *s = get_first_seg();
          if (s && (s->startEA & 0xFFF)) {
-            dword currstart = s->startEA;
-            dword newstart = s->startEA & ~0xFFF;
+            dword currstart = (dword)s->startEA;
+            dword newstart = (dword)s->startEA & ~0xFFF;
             set_segm_start(s->startEA, newstart, SEGMOD_SILENT);
             for (dword i = newstart; i < currstart; i++) {
                patch_byte(i, 0);
@@ -2181,8 +2181,8 @@ void idaapi run(int /*arg*/) {
          
          s = get_last_seg();
          if (s && (s->endEA & 0xFFF)) {
-            dword currend = s->endEA;
-            dword newend = (s->endEA + 0xFFF) & ~0xFFF;
+            dword currend = (dword)s->endEA;
+            dword newend = (dword)(s->endEA + 0xFFF) & ~0xFFF;
             set_segm_end(s->startEA, newend, SEGMOD_SILENT);
             for (dword i = currend; i < newend; i++) {
                patch_byte(i, 0);
@@ -2277,7 +2277,7 @@ void idaapi run(int /*arg*/) {
          createWindowsProcess();
       }
       if (!cpuInit) {
-         dword init_eip = get_screen_ea();
+         dword init_eip = (dword)get_screen_ea();
          dword idtBase = 0;
          dword idtLimit = 0x800;
          dword gdtBase = 0;
@@ -2326,7 +2326,7 @@ void idaapi run(int /*arg*/) {
          initGDTR(gdtBase, gdtLimit);
       }
 
-      pCmdLineA = x86emu_node.altval(EMU_COMMAND_LINE);  
+      pCmdLineA = (dword)x86emu_node.altval(EMU_COMMAND_LINE);  
 
 #if IDA_SDK_VERSION >= 530
       TForm *stackForm = open_disasm_window("Stack");
@@ -2336,7 +2336,7 @@ void idaapi run(int /*arg*/) {
       switchto_tform(mainForm, true);
 #endif
       if (!cpuInit) {
-         cpu.eip = get_screen_ea();
+         cpu.eip = (dword)get_screen_ea();
       }
       isWindowCreated = createEmulatorWindow();
    }

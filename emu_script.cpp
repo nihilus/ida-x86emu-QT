@@ -89,7 +89,7 @@ static error_t idaapi idc_emu_sync(idc_value_t * /*argv*/, idc_value_t * /*res*/
 static error_t idaapi idc_emu_getreg(idc_value_t *argv, idc_value_t *res) {
    res->vtype = VT_LONG;
    if (argv[0].vtype == VT_LONG) {
-      dword regnum = argv[0].num;
+      dword regnum = (dword)argv[0].num;
       switch (regnum) {
          case EAX_REG: case ECX_REG: case EDX_REG: case EBX_REG:
          case ESP_REG: case EBP_REG: case ESI_REG: case EDI_REG:
@@ -132,8 +132,8 @@ static error_t idaapi idc_emu_setreg(idc_value_t *argv, idc_value_t *res) {
    res->vtype = VT_LONG;
    res->num = 0;
    if (argv[0].vtype == VT_LONG && argv[1].vtype == VT_LONG) {
-      dword regnum = argv[0].num;
-      dword regval = argv[1].num;
+      dword regnum = (dword)argv[0].num;
+      dword regval = (dword)argv[1].num;
       switch (regnum) {
          case EAX_REG: case ECX_REG: case EDX_REG: case EBX_REG:
          case ESP_REG: case EBP_REG: case ESI_REG: case EDI_REG:
@@ -171,7 +171,7 @@ static error_t idaapi idc_emu_setreg(idc_value_t *argv, idc_value_t *res) {
 static error_t idaapi idc_emu_addbpt(idc_value_t *argv, idc_value_t *res) {
    res->vtype = VT_LONG;
    if (argv[0].vtype == VT_LONG) {
-      dword addr = argv[0].num;
+      dword addr = (dword)argv[0].num;
       addBreakpoint(addr);
       res->num = 1;
    }

@@ -639,7 +639,7 @@ bool checkStackRange(dword addr) {
          return false;
       }
       dword pageBase = addr & ~0xFFF; //truncate to 4k boundary
-      dword minStack = stack->endEA - maxStackSize;
+      dword minStack = (dword)stack->endEA - maxStackSize;
       if (pageBase < stack->endEA && pageBase >= minStack) {
          set_segm_start(stack->startEA, pageBase, 0);
       }

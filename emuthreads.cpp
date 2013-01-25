@@ -73,7 +73,7 @@ dword getNewStackLocation() {
    int count = 1;
    char buf[16];
    segment_t *s = get_segm_by_name(".stack");
-   dword top = s->endEA + 0xFFFF;
+   dword top = (dword)s->endEA + 0xFFFF;
    while (getseg(top)) {
       top += 0x10000;
       count++;

@@ -3,7 +3,7 @@
 #or absolute
 SDK = ../../..
 
-OBJECTS_DIR = p32
+OBJECTS_DIR = p64
 
 #Need to change the following to your Ida install location
 win32:IDA_APP = "C:/Program Files/Ida"
@@ -37,7 +37,7 @@ INCLUDEPATH += $${SDK}/include
 
 DESTDIR = $${SDK}/bin/plugins
 
-DEFINES += __IDP__ __QT__
+DEFINES += __IDP__ __QT__ __EA64__
 win32:DEFINES += __NT__ WIN32
 win32:DEFINES -= UNICODE
 win32:DEFINES += _CRT_SECURE_NO_WARNINGS
@@ -46,14 +46,14 @@ macx:DEFINES += __MAC__
 
 win32:LIBS += comdlg32.lib gdi32.lib user32.lib advapi32.lib ida.lib
 win32-msvc2008: {
-   exists( $${SDK}/lib/vc.w32/ida.lib ) {
-      LIBS += -L$${SDK}/lib/vc.w32
+   exists( $${SDK}/lib/vc.w64/ida.lib ) {
+      LIBS += -L$${SDK}/lib/vc.w64
    } else {
-      LIBS += -L$${SDK}/lib/x86_win_vc_32
+      LIBS += -L$${SDK}/lib/x86_win_vc_64
    }
 }
-linux-g++:LIBS += -L$${IDA_APP} -lida
-macx:LIBS += -L$${IDA_APP}/MacOs -lida
+linux-g++:LIBS += -L$${IDA_APP} -lida64
+macx:LIBS += -L$${IDA_APP}/MacOs -lida64
 
 #don't let qmake force search any libs other than the
 #ones that ship with Ida
@@ -111,8 +111,8 @@ HEADERS = break.h \
    x86emu_ui_qt.h \
    x86defs.h
 
-win32:TARGET_EXT=.plw
-linux-g++:TARGET_EXT=.plx
-macx:TARGET_EXT=.pmc
+win32:TARGET_EXT=.p64
+linux-g++:TARGET_EXT=.plx64
+macx:TARGET_EXT=.pmc64
 
 TARGET = x86emu_qt

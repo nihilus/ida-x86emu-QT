@@ -37,9 +37,9 @@
 #endif
 #endif
 
-#include <QtGui/QMessageBox>
-#include <QtGui/QToolBar>
-#include <QtGui/QButtonGroup>
+#include <QMessageBox>
+#include <QToolBar>
+#include <QButtonGroup>
 
 #include "x86emu_ui_qt.h"
 
@@ -517,13 +517,13 @@ MemConfigDialog::MemConfigDialog(QWidget *parent) : QDialog(parent) {
    char buf[16];
    segment_t *s = get_segm_by_name(".stack");
    segment_t *h = get_segm_by_name(".heap");
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", s->endEA);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)s->endEA);
    stack_top->setText(buf);
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", s->endEA - s->startEA);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)(s->endEA - s->startEA));
    stack_size->setText(buf);
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", h->startEA);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)h->startEA);
    heap_base->setText(buf);
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", h->endEA - h->startEA);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)(h->endEA - h->startEA));
    heap_size->setText(buf);
 
    QFormLayout *fl = new QFormLayout();

@@ -138,7 +138,7 @@ void MemMgr::reserve(dword addr, dword size) {
 
 dword MemMgr::mapFixed(dword addr, dword size, dword /*prot*/, dword flags, const char *name) {
    if (addr == 0 || (flags & MM_MAP_FIXED) == 0) {
-      return BADADDR;
+      return (dword)BADADDR;
    }
    dword end = addr + size;
    segment_t *s = getseg(addr);
@@ -196,7 +196,7 @@ dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *
       return mapFixed(addr, size, prot, flags, name);
    }
    if (addr == 0) {
-      addr = kernel_node.altval(OS_MIN_ADDR);
+      addr = (dword)kernel_node.altval(OS_MIN_ADDR);
 //      addr = inf.minEA;
    }
    while (1) {
@@ -205,7 +205,7 @@ dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *
          segment_t *n = next_seg(addr);
          dword avail = 0;
          if (n) {
-            avail = n->startEA - addr;
+            avail = (dword)n->startEA - addr;
          }
          else {
             avail = 0 - addr;
@@ -223,7 +223,7 @@ dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *
             return addr;
          }
          if (n == NULL) {
-            return BADADDR;
+            return (dword)BADADDR;
          }
          s = n;
       }

@@ -327,7 +327,7 @@ void addVectoredExceptionHandler(bool first, dword handler) {
       n->next = NULL;
       if (vehList) {
          VehNode *h;
-         for (h = vehList; h->next; h = h->next);
+         for (h = vehList; h->next; h = h->next) {}
          h->next = n;
       }
       else {

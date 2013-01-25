@@ -26,15 +26,15 @@
 #endif
 #endif
 
-#include <QtGui/QtGui>
-#include <QtGui/QDialog>
-#include <QtGui/QListWidget>
-#include <QtGui/QLineEdit>
-#include <QtGui/QComboBox>
-#include <QtGui/QMainWindow>
-#include <QtGui/QRadioButton>
-#include <QtGui/QValidator>
-#include <QtGui/QSpinBox>
+#include <QtGui>
+#include <QDialog>
+#include <QListWidget>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QMainWindow>
+#include <QRadioButton>
+#include <QValidator>
+#include <QSpinBox>
 
 #include "x86defs.h"
 #include "x86emu_ui.h"
