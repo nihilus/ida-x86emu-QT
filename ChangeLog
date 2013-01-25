@@ -1,5 +1,14 @@
+* 01/24/13
+  Added build for Ida64
+  Release version 1.0.7
+
+* 01/09/13
+  Updated code for Ida 6.4 compatibility. Added build for Ida64
+  Release version 1.0.6
+
 * 12/11/10
   Fixed bug in 16 bit address mode decoding pointed out by Rafal Cyran
+  Release version 1.0.5
   
 * 11/23/10
   Fixed behavior of cmovXX instruction.
