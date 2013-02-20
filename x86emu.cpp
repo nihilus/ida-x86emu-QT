@@ -2302,7 +2302,7 @@ void idaapi run(int /*arg*/) {
          }
          else { //"elf" and others land here
             //need to properly handle brk and heap creation
-//            createElfHeap();   //do this first so it goes right after exe
+            createElfHeap();   //do this first so it goes right after exe
             createElfStack();
             buildElfEnvironment(elf_base);
             //create initial thread

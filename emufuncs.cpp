@@ -2332,7 +2332,7 @@ void emu_CreateThread(dword /*addr*/) {
    }
 }
 
-//this is a heap allocation routine that alsow updates a 
+//this is a heap allocation routine that also updates a 
 //windows PEB
 dword addHeapCommon(unsigned int maxSize, unsigned int base) {
    if (fsBase) {
