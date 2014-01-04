@@ -127,11 +127,27 @@ QLineEdit *regToControl(unsigned int reg) {
 //value. Useful for updating register contents based on user
 //input
 void updateRegisterDisplay(int r) {
+   static bool registersSet[MAX_REG + 1];
+   static unsigned int current[MAX_REG + 1];
    QLineEdit *l = regToControl(r);
    if (l) {
       char buf[16];
-      ::qsnprintf(buf, sizeof(buf), "0x%08X", getRegisterValue(r));
+      unsigned int rval = getRegisterValue(r);
+      ::qsnprintf(buf, sizeof(buf), "0x%08X", rval);
       QString v(buf);
+      if (registersSet[r]) {
+         if (rval != current[r]) {
+            current[r] = rval;
+            l->setStyleSheet("QLineEdit{color: red;}");
+         }
+         else {
+            l->setStyleSheet("QLineEdit{color: black;}");
+         }
+      }
+      else {
+         registersSet[r] = true;
+         current[r] = rval;
+      }
       l->setText(v);
    }
 }
@@ -1121,6 +1137,10 @@ void X86Dialog::segments() {
    segs.exec();
 }
 
+void X86Dialog::loadLibrary() {
+   ::loadLibrary();
+}
+
 #define X86_WINDOW_FLAGS Qt::CustomizeWindowHint | \
                          Qt::WindowTitleHint | \
                          Qt::WindowMinimizeButtonHint | \
@@ -1139,6 +1159,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    QAction *emulateRemove_breakpointAction = new QAction("Remove breakpoint...", this);
    QAction *emulateSwitch_threadAction = new QAction("Switch thread...", this);
    QAction *emulateWindowsAuto_hookAction = new QAction("Auto hook", this);
+   QAction *emulateWindowsLoadLibraryAction = new QAction("Load entire library file...", this);
    QAction *emulateWindowsSet_import_addr_save_pointAction = new QAction("Set import addr save point", this);
    QAction *emulateWindowsExport_lookupAction = new QAction("Export lookup...", this);
    emulateTrack_fetched_bytesAction = new QAction("Track fetched bytes", this);
@@ -1321,6 +1342,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    Emulate->addAction(emulateTrace_executionAction);
    Emulate->addAction(emulateLogLibraryAction);
    popupMenu_13->addAction(emulateWindowsAuto_hookAction);
+   popupMenu_13->addAction(emulateWindowsLoadLibraryAction);
    popupMenu_13->addAction(emulateWindowsSet_import_addr_save_pointAction);
    popupMenu_13->addAction(popupMenu_16->menuAction());
    popupMenu_13->addAction(emulateWindowsExport_lookupAction);
@@ -1364,6 +1386,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    connect(emulateRemove_breakpointAction, SIGNAL(triggered()), this, SLOT(clearBreak()));
    connect(emulateSettingsAction, SIGNAL(triggered()), this, SLOT(settings()));
    connect(emulateSwitch_threadAction, SIGNAL(triggered()), this, SLOT(switchThreads()));
+   connect(emulateWindowsLoadLibraryAction, SIGNAL(triggered()), this, SLOT(loadLibrary()));
    connect(emulateWindowsExport_lookupAction, SIGNAL(triggered()), this, SLOT(exportLookup()));
    connect(emulateWindowsSet_import_addr_save_pointAction, SIGNAL(triggered()), this, SLOT(setImportAddressSavePoint()));
    connect(emulateWindowsThrow_exceptionMemory_accessAction, SIGNAL(triggered()), this, SLOT(memoryException()));

@@ -321,6 +321,7 @@ BEGIN
         POPUP "Windows"
         BEGIN
             MENUITEM "Auto hook",                   IDC_AUTOHOOK, CHECKED
+            MENUITEM "Load entire library file...", IDC_LOADLIB
             MENUITEM "Set import addr save point",  IDC_GPA
             POPUP "Throw exception"
             BEGIN

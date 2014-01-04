@@ -37,6 +37,7 @@ INCLUDEPATH += $${SDK}/include
 
 DESTDIR = $${SDK}/bin/plugins
 
+#DEFINES += DEBUG
 DEFINES += __IDP__ __QT__
 win32:DEFINES += __NT__ WIN32
 win32:DEFINES -= UNICODE

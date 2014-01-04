@@ -65,45 +65,15 @@ Studio environment variables are properly set)
 
 ---------------------------------------------------------------------------
 
-BUILDING WITH VISUAL C++ (VISUAL STUDIO 2008)
+BUILDING WITH VISUAL C++ (VISUAL STUDIO 2010)
 
 These instructions are applicable only to the idag (native Windows) version
 of the plugin.
 
-The VC++ workspace file for VC++6.0 and is named: x86Emulator.dsw
-The VC++ solution file for Visual Studio 2005 and is named: x86Emulator_vs05.sln
-The VC++ solution file for Visual Studio 2008 and is named: x86Emulator.sln
+The VC++ solution file for Visual Studio 2010 and above and is named: x86emu.sln
 
-Visual Studio 2008 users may need to copy files afxres.h and winres.h from
-the Windows Platform SDK available for free from Microsoft.
-
-Open the appropriate file with Visual Studio and you should be able to build 
+Open the solution file with Visual Studio and you should be able to build 
 x86emu.plw which will end up in <SDK>bin\plugins\x86emu.plw
-
-There is a makefile for use with MS dev tools:  x86Emulator.mak so it
-may be possible to build from the command line.
-
----------------------------------------------------------------------------
-
-BUILDING WITH MinGW (My prefered method of building the native Windows
-version of the plugin)
-
-These instructions are applicable only to the idag (native Windows) version
-of the plugin.
-
-The mingw makefile is: Makefile.  Build the plugin with the following
-command line:
-
-make
-
-The plugin, x86emu.plw, will be placed in the <SDK_DIR>\bin\plugins directory
-
-Make sure you have both g++ (3.x) and make installed in your MinGW setup. 
-You will need to install both MinGW and MSYS.
-
-See:
-http://www.mingw.org/wiki/InstallationHOWTOforMinGW
-http://www.mingw.org/wiki/MSYS
 
 ---------------------------------------------------------------------------
 

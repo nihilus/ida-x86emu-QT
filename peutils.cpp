@@ -48,6 +48,13 @@
 #include "peutils.h"
 #include "sdk_versions.h"
 
+#ifndef DEBUG
+//#define DEBUG 1
+#endif
+
+//from emufuncs.h
+unsigned int getModuleEnd(unsigned int handle);
+
 extern til_t *ti;
 
 static char *stringFromFile(FILE *f) {
@@ -122,10 +129,14 @@ void createSegment(unsigned int start, unsigned int size, unsigned char *content
       if (content) {
          patch_many_bytes(s.startEA, content, clen ? clen : size);
       }
-//      msg("segment created %x-%x\n", s.startEA, s.endEA);
+#ifdef DEBUG
+      msg("segment created %x-%x\n", s.startEA, s.endEA);
+#endif
    }
    else {
-//      msg("seg create failed\n");
+#ifdef DEBUG
+      msg("seg create failed\n");
+#endif
    }
 }
 
@@ -458,7 +469,7 @@ unsigned int loadIntoIdb(FILE *dll) {
    _IMAGE_NT_HEADERS nt, *pnt;
    _IMAGE_SECTION_HEADER sect, *psect;
    unsigned int exp_size, exp_rva, exp_fileoff;
-   _IMAGE_EXPORT_DIRECTORY *expdir;
+   _IMAGE_EXPORT_DIRECTORY *expdir = NULL;
    unsigned int len, handle;
    
    if (fread(&dos, sizeof(_IMAGE_DOS_HEADER), 1, dll) != 1) {
@@ -487,16 +498,67 @@ unsigned int loadIntoIdb(FILE *dll) {
    pnt = (_IMAGE_NT_HEADERS*)(dat + pdos->e_lfanew);
    handle = pnt->OptionalHeader.ImageBase;
    psect = (_IMAGE_SECTION_HEADER*)(pnt + 1);
-   
+
+   //now loop to find hole large enough to accomodate image
+   //try ImageBase first
+   bool found = false;
+   bool triedDefault = handle == 0x10000000;
+   do {
+      msg("Trying base address of 0x%x\n", handle);
+      segment_t *s = getseg(handle);
+      if (s == NULL) {
+#if (IDA_SDK_VERSION < 530)
+         segment_t *n = (segment_t *)segs.getn_area(segs.get_next_area(handle));
+#else
+         segment_t *n = get_next_seg(handle);
+#endif
+         if (n != NULL) {
+            unsigned int moduleEnd = getModuleEnd(n->startEA);
+            if (moduleEnd == 0xffffffff) {
+               moduleEnd = n->endEA;
+            }
+            if ((n->startEA - handle) >= nt.OptionalHeader.SizeOfImage) {
+               found = true;
+            }
+            else {
+               handle = (moduleEnd + 0x10000) & ~0xffff;
+            }
+         }
+         else if ((0x80000000 - handle) >= nt.OptionalHeader.SizeOfImage) {
+            found = true;
+         }
+      }
+      else {
+         unsigned int moduleEnd = getModuleEnd(s->startEA);
+         if (moduleEnd == 0xffffffff) {
+            moduleEnd = s->endEA;
+         }
+         handle = (moduleEnd + 0x10000) & ~0xffff;
+      }
+
+      if (!found && (handle >= 0x80000000 || (0x80000000 - handle) < nt.OptionalHeader.SizeOfImage)) {
+         if (triedDefault) {
+            //no room to load this library
+            free(dat);
+            return 0xFFFFFFFF;
+         }
+         else {
+            handle = 0x10000000;
+            triedDefault = true;
+         }
+      }
+   } while (!found);
+
    createSegment(handle, len, dat);
 
    applyPEHeaderTemplates(handle);
 
    exp_rva = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
    exp_size = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
-   exp_fileoff = rvaToFileOffset(psect, nt.FileHeader.NumberOfSections, exp_rva);
-   expdir = (_IMAGE_EXPORT_DIRECTORY*)malloc(exp_size);
-
+   if (exp_rva && exp_size) {
+      exp_fileoff = rvaToFileOffset(psect, nt.FileHeader.NumberOfSections, exp_rva);
+      expdir = (_IMAGE_EXPORT_DIRECTORY*)malloc(exp_size);
+   }
    if (expdir == NULL || fseek(dll, exp_fileoff, SEEK_SET) || fread(expdir, exp_size, 1, dll) != 1) {
       free(dat);
       free(expdir);
@@ -509,11 +571,11 @@ unsigned int loadIntoIdb(FILE *dll) {
       //EAT lies outside directory bounds
       msg("EAT lies outside directory bounds\n");
    }
-   if (expdir->AddressOfNames < exp_rva || expdir->AddressOfNames >= (exp_rva + exp_size)) {
+   if (expdir->AddressOfNames != 0 && expdir->AddressOfNames < exp_rva || expdir->AddressOfNames >= (exp_rva + exp_size)) {
       //ENT lies outside directory bounds
       msg("ENT lies outside directory bounds\n");
    }
-   if (expdir->AddressOfNameOrdinals < exp_rva || expdir->AddressOfNameOrdinals >= (exp_rva + exp_size)) {
+   if (expdir->AddressOfNameOrdinals != 0 && expdir->AddressOfNameOrdinals < exp_rva || expdir->AddressOfNameOrdinals >= (exp_rva + exp_size)) {
       //EOT lies outside directory bounds
       msg("EOT lies outside directory bounds\n");
    }

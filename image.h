@@ -146,14 +146,14 @@ typedef struct _IMAGE_VXD_HEADER {      // Windows VXD header
 //
 
 typedef struct _IMAGE_FILE_HEADER {
-    WORD    Machine;
-    WORD    NumberOfSections;
-    DWORD   TimeDateStamp;
-    DWORD   PointerToSymbolTable;
-    DWORD   NumberOfSymbols;
-    WORD    SizeOfOptionalHeader;
-    WORD    Characteristics;
-} IMAGE_FILE_HEADER, *PIMAGE_FILE_HEADER;
+    WORD    Machine;                   //0
+    WORD    NumberOfSections;          //2 
+    DWORD   TimeDateStamp;             //4
+    DWORD   PointerToSymbolTable;      //8
+    DWORD   NumberOfSymbols;           //12
+    WORD    SizeOfOptionalHeader;      //16
+    WORD    Characteristics;           //18
+} IMAGE_FILE_HEADER, *PIMAGE_FILE_HEADER;   //20
 
 
 #define IMAGE_SIZEOF_FILE_HEADER             20
@@ -407,14 +407,14 @@ typedef PIMAGE_NT_HEADERS32                 PIMAGE_NT_HEADERS;
 #define IMAGE_SIZEOF_SHORT_NAME              8
 
 typedef struct _IMAGE_SECTION_HEADER {
-    BYTE    Name[IMAGE_SIZEOF_SHORT_NAME];
+    BYTE    Name[IMAGE_SIZEOF_SHORT_NAME];    //0
     union {
-            DWORD   PhysicalAddress;
+            DWORD   PhysicalAddress;          //8
             DWORD   VirtualSize;
     } Misc;
-    DWORD   VirtualAddress;
-    DWORD   SizeOfRawData;
-    DWORD   PointerToRawData;
+    DWORD   VirtualAddress;                   //12
+    DWORD   SizeOfRawData;                    //16
+    DWORD   PointerToRawData;                 //20
     DWORD   PointerToRelocations;
     DWORD   PointerToLinenumbers;
     WORD    NumberOfRelocations;

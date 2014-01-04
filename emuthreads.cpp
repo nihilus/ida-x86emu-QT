@@ -79,7 +79,8 @@ dword getNewStackLocation() {
       count++;
    }
    ::qsnprintf(buf, sizeof(buf), ".stack%d", count);
-   MemMgr::mmap(top - 0xFFFF, 0x1000, 0, 0, buf);
+   MemMgr::mmap(top - 0xFFFF, 0x10000, 0, 0, buf);
+   formatStack(top - 0xFFFF, top + 1);
    return top + 1;
 }
 

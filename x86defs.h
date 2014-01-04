@@ -494,7 +494,7 @@ void forceCode();
 void codeCheck(void);
 dword parseNumber(char *numb);
 void dumpRange();
-bool isStringPointer(char *type_str);
+bool isStringPointer(const char *type_str);
 void skip();
 void grabStackBlock();
 void grabHeapBlock();
@@ -532,6 +532,9 @@ void generateArgList(const char *func, argcallback_t cb, void *user);
 void buildMainArgs();
 void buildWinMainArgs();
 void buildDllMainArgs();
+void formatStack(dword begin, dword end);
+
+bool loadLibrary();
 
 #ifdef __NT__
 #define DIR_SEP '\\'

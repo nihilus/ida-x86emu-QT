@@ -58,7 +58,11 @@ void createNewSegment(const char *name, dword base, dword size) {
    if (strcmp(name, ".teb") == 0) {
       haveTEB = true;
       tebSel = s.sel = allocate_selector(base >> 4);
+#if IDA_SDK_VERSION >= 650
+      set_default_segreg_value(NULL, R_fs, s.sel);
+#else
       SetDefaultRegisterValue(NULL, R_fs, s.sel);
+#endif
    }
    s.startEA = base;
    s.endEA = base + size;
@@ -72,11 +76,19 @@ void createNewSegment(const char *name, dword base, dword size) {
 //   if (add_segm_ex(&s, name, "DATA", ADDSEG_QUIET | ADDSEG_NOSREG)) {
    if (add_segm_ex(&s, name, "CODE", ADDSEG_QUIET | ADDSEG_NOSREG)) {
       //zero out the newly created segment
-      for (ea_t ea = s.startEA; ea < s.endEA; ea++) {
-         patch_byte(ea, 0);
+      ea_t ea;
+      for (ea = s.startEA; ea < (s.endEA - 4); ea += 4) {
+         patch_long(ea, 0);
+      }
+      while (ea < s.endEA) {
+         patch_long(ea++, 0);
       }
       if (haveTEB) {
+#if IDA_SDK_VERSION >= 650
+         set_default_segreg_value(&s, R_fs, tebSel);
+#else
          SetDefaultRegisterValue(&s, R_fs, tebSel);
+#endif
       }
    }
 }

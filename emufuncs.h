@@ -21,10 +21,14 @@
 #ifndef __EMULATE_FUNCS_H
 #define __EMULATE_FUNCS_H
 
+#include <typeinf.hpp>
+
 #include <stdio.h>
 #include "buffer.h"
 #include "peutils.h"
 #include "hooklist.h"
+
+#include "sdk_versions.h"
 
 #define CALL_CDECL 0
 #define CALL_STDCALL 1
@@ -34,8 +38,12 @@ struct FunctionInfo {
    dword result;
    dword stackItems;
    dword callingConvention;
+#if IDA_SDK_VERSION >= 650
+   tinfo_t ftype;
+#else
    const type_t *type;
    const p_list *fields;
+#endif
    FunctionInfo *next;
 };
 
@@ -55,6 +63,7 @@ void emu_HeapCreate(unsigned int addr = 0);
 void emu_HeapDestroy(unsigned int addr = 0);
 void emu_HeapAlloc(unsigned int addr = 0);
 void emu_HeapFree(unsigned int addr = 0);
+void emu_HeapSize(unsigned int addr = 0);
 void emu_GetProcessHeap(unsigned int addr = 0);
 
 void emu_GlobalAlloc(unsigned int addr = 0);
@@ -68,13 +77,19 @@ void emu_LdrGetProcedureAddress(unsigned int addr = 0);
 void emu_VirtualAlloc(unsigned int addr = 0);
 void emu_VirtualFree(unsigned int addr = 0);
 void emu_VirtualProtect(unsigned int addr = 0);
+void emu_LocalLock(unsigned int addr = 0);
+void emu_LocalUnlock(unsigned int addr = 0);
 void emu_LocalAlloc(unsigned int addr = 0);
+void emu_LocalReAlloc(unsigned int addr = 0);
 void emu_LocalFree(unsigned int addr = 0);
 void emu_GetProcAddress(unsigned int addr = 0);
 void emu_GetModuleHandleA(unsigned int addr = 0);
 void emu_GetModuleHandleW(unsigned int addr = 0);
+void emu_FreeLibrary(unsigned int addr = 0);
 void emu_LoadLibraryA(unsigned int addr = 0);
 void emu_LoadLibraryW(unsigned int addr = 0);
+void emu_LoadLibraryExA(unsigned int addr = 0);
+void emu_LoadLibraryExW(unsigned int addr = 0);
 
 void emu_malloc(unsigned int addr = 0);
 void emu_calloc(unsigned int addr = 0);
@@ -181,6 +196,26 @@ void emu_FreeEnvironmentStringsW(dword addr);
 void emu_GetCommandLineA(dword addr);
 void emu_GetCommandLineW(dword addr);
 
+void emu_GetStdHandle(dword addr);
+void emu_GetStartupInfoA(dword addr);
+void emu_GetStartupInfoW(dword addr);
+
+void emu_GetCPInfo(dword addr);
+void emu_WideCharToMultiByte(dword addr);
+void emu_MultiByteToWideChar(dword addr);
+void emu_GetStringTypeW(dword addr);
+void emu_GetStringTypeA(dword addr);
+void emu_LCMapStringW(dword addr);
+void emu_LCMapStringA(dword addr);
+
+void emu_GetLocaleInfoA(dword addr);
+void emu_GetLocaleInfoW(dword addr);
+
+void emu_GetWindowsDirectoryA(dword addr);
+void emu_GetWindowsDirectoryW(dword addr);
+void emu_GetSystemDirectoryA(dword addr);
+void emu_GetSystemDirectoryW(dword addr);
+
 dword addHeapCommon(unsigned int maxSize, unsigned int base = 0);
 
 void syscall();
@@ -193,9 +228,27 @@ void loadModuleList(Buffer &b);
 void saveModuleData(Buffer &b);
 void loadModuleData(Buffer &b);
 
-struct HandleList;
-HandleList *addModule(const char *mod, bool loading, int id);
+struct HandleNode {
+   char *moduleName;
+   dword handle;
+   dword id;
+   dword maxAddr;
+   dword ordinal_base;
+   dword NoF;  //NumberOfFunctions
+   dword NoN;  //NumberOfNames
+   dword eat;  //AddressOfFunctions  export address table
+   dword ent;  //AddressOfNames      export name table
+   dword eot;  //AddressOfNameOrdinals  export ordinal table
+   HandleNode *next;
+};
+
+dword getHandle(HandleNode *m);
+dword getModuleEnd(dword handle);
+dword getId(HandleNode *m);
+HandleNode *addModule(const char *mod, bool loading, int id, bool addToPeb = true);
 void addModuleToPeb(dword handle, const char *name, bool loading = false);
+void addModuleToPeb(HandleNode *hn, bool loading, dword unicodeName = 0);
+HandleNode *addNewModuleNode(const char *mod, dword h, dword id);
 
 hookfunc checkForHook(char *funcName, dword funcAddr, dword moduleId);
 void doImports(dword import_drectory, dword size, dword image_base);
@@ -204,6 +257,7 @@ bool isModuleAddress(dword addr);
 char *reverseLookupExport(dword addr);
 
 FunctionInfo *getFunctionInfo(const char *name);
+void clearFunctionInfoList(void);
 void addFunctionInfo(const char *name, dword result, dword nitems, dword callType);
 void saveFunctionInfo(Buffer &b);
 void loadFunctionInfo(Buffer &b);
@@ -217,6 +271,7 @@ typedef void (*unemulatedCB)(unsigned int addr, const char *name);
 
 void setUnemulatedCB(unemulatedCB cb);
 
+dword myGetProcAddress(dword hModule, dword lpProcName);
 dword myGetProcAddress(dword hModule, const char *procName);
 dword myGetModuleHandle(const char *modName);
 

@@ -67,20 +67,6 @@ void removeVectoredExceptionHandler(dword handler);
 
 extern HWND x86Dlg;
 
-struct HandleList {
-   char *moduleName;
-   dword handle;
-   dword id;
-   dword maxAddr;
-   dword ordinal_base;
-   dword NoF;  //NumberOfFunctions
-   dword NoN;  //NumberOfNames
-   dword eat;  //AddressOfFunctions  export address table
-   dword ent;  //AddressOfNames      export name table
-   dword eot;  //AddressOfNameOrdinals  export ordinal table
-   HandleList *next;
-};
-
 struct FakedImport {
    dword handle;  //module handle the lookup was performed on
    dword addr;    //returned fake import address
@@ -88,7 +74,7 @@ struct FakedImport {
    FakedImport *next;
 };
 
-static HandleList *moduleHead = NULL;
+static HandleNode *moduleHead = NULL;
 static FunctionInfo *functionInfoList = NULL;
 
 static FakedImport *fakedImportList = NULL;
@@ -118,19 +104,26 @@ HookEntry hookTable[] = {
    {"VirtualAlloc", emu_VirtualAlloc},
    {"VirtualFree", emu_VirtualFree},
    {"VirtualProtect", emu_VirtualProtect},
+   {"LocalLock", emu_LocalLock},
+   {"LocalUnlock", emu_LocalUnlock},
    {"LocalAlloc", emu_LocalAlloc},
+   {"LocalReAlloc", emu_LocalReAlloc},
    {"LocalFree", emu_LocalFree},
    {"GetProcAddress", emu_GetProcAddress},
    {"GetModuleHandleA", emu_GetModuleHandleA},
    {"GetModuleHandleW", emu_GetModuleHandleW},
+   {"FreeLibrary", emu_FreeLibrary},
    {"LoadLibraryA", emu_LoadLibraryA},
    {"LoadLibraryW", emu_LoadLibraryW},
+   {"LoadLibraryExA", emu_LoadLibraryExA},
+   {"LoadLibraryExW", emu_LoadLibraryExW},
    {"HeapCreate", emu_HeapCreate},
    {"HeapDestroy", emu_HeapDestroy},
    {"GlobalAlloc", emu_GlobalAlloc},
    {"GlobalFree", emu_GlobalFree},
    {"GlobalLock", emu_GlobalLock},
    {"HeapAlloc", emu_HeapAlloc},
+   {"HeapSize", emu_HeapSize},
    {"RtlAllocateHeap", emu_HeapAlloc},
    {"HeapFree", emu_HeapFree},
    {"GetProcessHeap", emu_GetProcessHeap},
@@ -252,6 +245,27 @@ HookEntry hookTable[] = {
    {"GetCommandLineA", emu_GetCommandLineA},
    {"GetCommandLineW", emu_GetCommandLineW},
 
+   {"GetStdHandle", emu_GetStdHandle},
+   {"GetStartupInfoA", emu_GetStartupInfoA},
+   {"GetStartupInfoW", emu_GetStartupInfoW},
+
+   {"GetCPInfo", emu_GetCPInfo},
+
+   {"WideCharToMultiByte", emu_WideCharToMultiByte},
+   {"MultiByteToWideChar", emu_MultiByteToWideChar},
+   {"GetStringTypeW", emu_GetStringTypeW},
+   {"GetStringTypeA", emu_GetStringTypeA},
+   {"LCMapStringW", emu_LCMapStringW},
+   {"LCMapStringA", emu_LCMapStringA},
+   
+   {"GetLocaleInfoA", emu_GetLocaleInfoA},
+   {"GetLocaleInfoW", emu_GetLocaleInfoW},
+
+   {"GetWindowsDirectoryA", emu_GetWindowsDirectoryA},
+   {"GetWindowsDirectoryW", emu_GetWindowsDirectoryW},
+   {"GetSystemDirectoryA", emu_GetSystemDirectoryA},
+   {"GetSystemDirectoryW", emu_GetSystemDirectoryW},
+
    {NULL, NULL}
 };
 
@@ -285,8 +299,8 @@ char *checkModuleExtension(char *module) {
    return result;
 }
 
-HandleList *findModuleByName(const char *h) {
-   HandleList *hl;
+HandleNode *findModuleByName(const char *h) {
+   HandleNode *hl;
    if (h == NULL) return NULL;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (stricmp(h, hl->moduleName) == 0) break;
@@ -295,18 +309,33 @@ HandleList *findModuleByName(const char *h) {
 }
 
 dword myGetModuleHandle(const char *modName) {
-   HandleList *h = findModuleByName(modName);
+   HandleNode *h = findModuleByName(modName);
    if (h == NULL) return 0xFFFFFFFF;
    return h->handle;
 }
 
-HandleList *findModuleByHandle(dword handle) {
-   HandleList *hl;
+HandleNode *findModuleByHandle(dword handle) {
+   HandleNode *hl;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (hl->handle == handle) break;
       if (hl->id == handle) break;       //for compatibility with old handle assignment style
    }
    return hl;
+}
+
+//return the end address of a loaded module
+//useful to deconflict in the case we loaded module headers only
+//return module end address or 0xffffffff for invalid handle
+dword getModuleEnd(dword handle) {
+   HandleNode *hl;
+   for (hl = moduleHead; hl; hl = hl->next) {
+      if (hl->handle == handle) break;
+   }
+   if (hl) {
+      dword nt = handle + get_long(handle + 0x3C); //e_lfanew
+      return handle + get_long(nt + 0x50); //nt.OptionalHeader.SizeOfImage
+   }
+   return 0xffffffff;
 }
 
 /*
@@ -331,7 +360,7 @@ IMAGE_NT_HEADERS *getPEHeader(HMODULE mod) {
 */
 
 //find an existing faked import
-FakedImport *findFakedImportByAddr(HandleList *mod, dword addr) {
+FakedImport *findFakedImportByAddr(HandleNode *mod, dword addr) {
    FakedImport *ff = NULL;
    for (ff = fakedImportList; ff; ff = ff->next) {
       if (ff->handle == mod->handle && ff->addr == addr) break;
@@ -339,7 +368,7 @@ FakedImport *findFakedImportByAddr(HandleList *mod, dword addr) {
    return ff;
 }
 
-FakedImport *findFakedImportByName(HandleList *mod, char *procName) {
+FakedImport *findFakedImportByName(HandleNode *mod, char *procName) {
    FakedImport *ff = NULL;
    for (ff = fakedImportList; ff; ff = ff->next) {
       if (ff->handle == mod->handle && strcmp(ff->name, procName) == 0) break;
@@ -348,7 +377,7 @@ FakedImport *findFakedImportByName(HandleList *mod, char *procName) {
 }
 
 //add a new faked import after first searching to see if it is already present
-FakedImport *addFakedImport(HandleList *mod, char *procName) {
+FakedImport *addFakedImport(HandleNode *mod, char *procName) {
    FakedImport *ff = findFakedImportByName(mod, procName);
    if (ff) return ff;
    ff = (FakedImport*)malloc(sizeof(FakedImport));
@@ -427,7 +456,6 @@ void insertHead(dword listHead, dword mod, int doff) {
 //   msg("handle is %x mod is %x\n", handle, mod);
    dword modFlink = mod + 24 - doff;
 //   msg("modFlink is %x\n", modFlink);
-   dword blink = listHead;
    dword flink;
 //   msg("listHead is %x\n", listHead);
    for (flink = get_long(listHead); 
@@ -435,7 +463,6 @@ void insertHead(dword listHead, dword mod, int doff) {
         flink = get_long(flink)) {
 //      msg("first check flink = %x\n", flink);
       if (get_long(flink + doff) == handle) return; //already in list
-      blink = flink;
    }
    flink = get_long(listHead);
    /*dword back =*/ get_long(flink + 4);
@@ -468,13 +495,10 @@ void insertInOrder(dword listHead, dword mod, int doff) {
 }
 
 bool containsModule(dword listHead, dword mod, int doff) {
-   dword blink = listHead;
-   dword flink;
-   for (flink = get_long(blink); 
+   for (dword flink = get_long(listHead); 
         flink != listHead; 
         flink = get_long(flink)) {
       if (get_long(flink + doff) == mod) return true; //already in list
-      blink = flink;
    }
    return false;
 }
@@ -493,27 +517,19 @@ bool cmp_c_to_dbuni(char *cstr, dword uni) {
    return false;
 }
 
-dword allocatePebUnicode(const char *str) {
-   segment_t *s = get_segm_by_name(".peb");
-   if (s) { 
-      dword pebEnd = (dword)s->endEA;
-      dword uni = pebEnd - 8;
-      while (get_long(uni + 4)) {
-         dword sz = get_word(uni + 2);
-         uni -= sz + 8;
-      }
-      int len = strlen(str);
-      patch_word(uni, len * 2);
-      patch_word(uni + 2, len * 2 + 2);
-      dword ustart = uni - len * 2 - 2;
-      patch_long(uni + 4, ustart);
-      for (int i = 0; i <= len; i++) {
-         patch_word(ustart, *str++);
-         ustart += 2;
-      }
-      return uni;
+dword allocateUnicodeString(const char *str) {
+   int len = strlen(str);
+   dword ustr = HeapBase::getHeap()->malloc(len * 2 + 2);
+   dword uni = HeapBase::getHeap()->malloc(8);  //sizeof(UNICODE_STRING)
+
+   patch_word(uni, len * 2);
+   patch_word(uni + 2, len * 2 + 2);
+   patch_long(uni + 4, ustr);
+   for (int i = 0; i <= len; i++) {
+      patch_word(ustr, *str++);
+      ustr += 2;
    }
-   return (dword)BADADDR;
+   return uni;
 }
 
 dword findPebModuleByName(char *name) {
@@ -538,18 +554,18 @@ dword findPebModuleByName(char *name) {
 
 void addModuleToPeb(dword handle, const char *name, bool loading) {
    segment_t *s = get_segm_by_name(".peb");
-   if (s) { 
-//      msg("adding %s (%x) to PEB\n", name, handle);
+   if (s) {
+      msg("adding %s (%x) to PEB\n", name, handle);
       dword peb = (dword)s->startEA;
       dword pebLdr = get_long(peb + 0xC);
-      dword modCount = get_long(pebLdr - 4);
-//      msg("modcount is %d\n", modCount);
+
+      dword uni = allocateUnicodeString(name);
+      msg("mod name allocated at %x\n", uni);
+
       //mod is the address of the LDR_MODULE that we are allocating
-      dword mod = pebLdr + PEB_LDR_DATA_SIZE + modCount * LDR_MODULE_SIZE;
+      dword mod = HeapBase::getHeap()->malloc(LDR_MODULE_SIZE);
       dword pe = handle + get_long(handle + 0x3C);
-//      msg("mod allocated at %x\n", mod);
-      dword uni = allocatePebUnicode(name);
-//      msg("mod name allocated at %x\n", uni);
+      msg("mod allocated at %x\n", mod);
       patch_long(mod + BASE_ADDRESS_OFFSET, handle);  //BaseAddress
       patch_long(mod + BASE_ADDRESS_OFFSET + 4, handle + get_long(pe + 0x28)); //EntryPoint
       patch_long(mod + BASE_ADDRESS_OFFSET + 8, get_long(pe + 0x50)); //SizeOfImage
@@ -563,7 +579,9 @@ void addModuleToPeb(dword handle, const char *name, bool loading) {
 //      patch_long(mod + 68, 0);  //TimeDateStamp
       
       dword loadOrder = pebLdr + 0xC;
+      msg("addModuleToPeb containsModule\n");
       if (containsModule(loadOrder, handle, 24)) return;
+      msg("addModuleToPeb containsModule complete\n");
 
       dword memoryOrder = pebLdr + 0x14;
       dword initOrder = pebLdr + 0x1C;
@@ -571,12 +589,67 @@ void addModuleToPeb(dword handle, const char *name, bool loading) {
          insertHead(initOrder, mod, 8);
       }
       else {
+         msg("addModuleToPeb insertTail, initOrder\n");
          insertTail(initOrder, mod, 8);
       }
+      msg("addModuleToPeb insertTail, loadOrder\n");
       insertTail(loadOrder, mod, 24);
+      msg("addModuleToPeb insertTail, memoryOrder\n");
       insertInOrder(memoryOrder, mod, 16);
-      modCount++;
-      patch_long(pebLdr - 4, modCount);
+
+      msg("module added %s (%x) to PEB\n", name, handle);
+   }
+}
+
+void addModuleToPeb(HandleNode *hn, bool loading, dword uni) {
+   segment_t *s = get_segm_by_name(".peb");
+   if (s) {
+      msg("adding %s (%x) to PEB\n", hn->moduleName, hn->handle);
+      dword peb = (dword)s->startEA;
+      dword pebLdr = get_long(peb + 0xC);
+
+      if (uni == 0) {
+         uni = allocateUnicodeString(hn->moduleName);
+      }
+      msg("mod name allocated at %x\n", uni);
+
+      //mod is the address of the LDR_MODULE that we are allocating
+      dword mod = HeapBase::getHeap()->malloc(LDR_MODULE_SIZE);
+
+      dword pe = hn->handle + get_long(hn->handle + 0x3C);
+      msg("mod allocated at %x\n", mod);
+      patch_long(mod + BASE_ADDRESS_OFFSET, hn->handle);  //BaseAddress
+      patch_long(mod + BASE_ADDRESS_OFFSET + 4, hn->handle + get_long(pe + 0x28)); //EntryPoint
+      patch_long(mod + BASE_ADDRESS_OFFSET + 8, get_long(pe + 0x50)); //SizeOfImage
+//      patch_long(mod + 36, 0);  //FullDllName
+      patch_long(mod + 44, get_long(uni));  //BaseDllName
+      patch_long(mod + 48, get_long(uni + 4));  //BaseDllName
+//      patch_long(mod + 52, 0);  //Flags
+      patch_long(mod + 56, 1);  //LoadCount
+//      patch_long(mod + 58, 0);  //TlsIndex
+//      patch_long(mod + 60, 0);  //HashTableEntry
+//      patch_long(mod + 68, 0);  //TimeDateStamp
+      
+      dword loadOrder = pebLdr + 0xC;
+      msg("addModuleToPeb containsModule\n");
+      if (containsModule(loadOrder, hn->handle, 24)) return;
+      msg("addModuleToPeb containsModule complete\n");
+
+      dword memoryOrder = pebLdr + 0x14;
+      dword initOrder = pebLdr + 0x1C;
+      if (loading) {
+         insertHead(initOrder, mod, 8);
+      }
+      else {
+         msg("addModuleToPeb insertTail, initOrder\n");
+         insertTail(initOrder, mod, 8);
+      }
+      msg("addModuleToPeb insertTail, loadOrder\n");
+      insertTail(loadOrder, mod, 24);
+      msg("addModuleToPeb insertTail, memoryOrder\n");
+      insertInOrder(memoryOrder, mod, 16);
+
+      msg("module added %s (%x) to PEB\n", hn->moduleName, hn->handle);
    }
 }
 
@@ -648,9 +721,48 @@ int getSystemDllDirectory(char *dir, int size) {
    return len;
 }
 
-HandleList *addModule(const char *mod, bool loading, int id) {
+dword getHandle(HandleNode *m) {
+   return m->handle;
+}
+
+dword getId(HandleNode *m) {
+   return m->id;
+}
+
+HandleNode *addNewModuleNode(const char *mod, dword h, dword id) {
+   HandleNode *m = (HandleNode*) calloc(1, sizeof(HandleNode));
+   m->next = moduleHead;
+   moduleHead = m;
+   m->moduleName = _strdup(mod);
+   m->handle = (dword) h;
+   if (h & FAKE_HANDLE_BASE) {
+      //faked module with no loaded export table
+      m->maxAddr = h + 1;
+   }
+   else {  //good module load
+      m->id = id ? id : moduleId;
+      moduleId += 0x10000;
+
+      dword pe_addr = m->handle + get_long(0x3C + m->handle);  //dos.e_lfanew
+      m->maxAddr = m->handle + get_long(pe_addr + 0x18 + 0x38); //nt.OptionalHeader.SizeOfImage
+
+      dword export_dir = m->handle + get_long(pe_addr + 0x18 + 0x60 + 0x0);  //export dir RVA
+ 
+      m->ordinal_base = get_long(export_dir + 0x10);   //ed.Base
+
+      m->NoF = get_long(export_dir + 0x14);  //ed.NumberOfFunctions
+      m->NoN = get_long(export_dir + 0x18);  //ed.NumberOfNames
+
+      m->eat = m->handle + get_long(export_dir + 0x1C);  //ed.AddressOfFunctions;
+      m->ent = m->handle + get_long(export_dir + 0x20);  //ed.AddressOfNames;
+      m->eot = m->handle + get_long(export_dir + 0x24);  //ed.AddressOfNameOrdinals;
+   }
+   return m;
+}
+
+HandleNode *addModule(const char *mod, bool loading, int id, bool addToPeb) {
    msg("x86emu: addModule called for %s\n", mod);
-   HandleList *m = findModuleByName(mod);
+   HandleNode *m = findModuleByName(mod);
    if (m == NULL) {
       dword h = 0;
       dword len;
@@ -713,42 +825,17 @@ HandleList *addModule(const char *mod, bool loading, int id) {
             moduleId += 0x10000;
          }
       }
-      m = (HandleList*) calloc(1, sizeof(HandleList));
-      m->next = moduleHead;
-      moduleHead = m;
-      m->moduleName = _strdup(mod);
-      m->handle = (dword) h;
-      if (h & FAKE_HANDLE_BASE) {
-         //faked module with no loaded export table
-         m->maxAddr = h + 1;
-      }
-      else {  //good module load
-         m->id = id ? id : moduleId;
-         moduleId += 0x10000;
-   
-         dword pe_addr = m->handle + get_long(0x3C + m->handle);  //dos.e_lfanew
-         m->maxAddr = m->handle + get_long(pe_addr + 0x18 + 0x38); //nt.OptionalHeader.SizeOfImage
-   
-         dword export_dir = m->handle + get_long(pe_addr + 0x18 + 0x60 + 0x0);  //export dir RVA
-    
-         m->ordinal_base = get_long(export_dir + 0x10);   //ed.Base
-   
-         m->NoF = get_long(export_dir + 0x14);  //ed.NumberOfFunctions
-         m->NoN = get_long(export_dir + 0x18);  //ed.NumberOfNames
-   
-         m->eat = m->handle + get_long(export_dir + 0x1C);  //ed.AddressOfFunctions;
-         m->ent = m->handle + get_long(export_dir + 0x20);  //ed.AddressOfNames;
-         m->eot = m->handle + get_long(export_dir + 0x24);  //ed.AddressOfNameOrdinals;
-      }
-      if (h) {
+      m = addNewModuleNode(mod, h, id);
+      if (h && addToPeb) {
          addModuleToPeb(h, mod, loading);
       }
    }
+   msg("addModule returning for %s\n", mod);
    return m;
 }
 
 void freeModuleList() {
-   for (HandleList *p = moduleHead; p; moduleHead = p) {
+   for (HandleNode *p = moduleHead; p; moduleHead = p) {
       p = p->next;
       free(moduleHead->moduleName);
       free(moduleHead);
@@ -775,7 +862,7 @@ void loadModuleList(Buffer &b) {
       if (tempid > moduleId) moduleId = tempid + 1;
       b.readString(&name);
       if (findModuleByName(name) == NULL) {
-         HandleList *m = addModule(name, false, id);
+         HandleNode *m = addModule(name, false, id);
          m->next = moduleHead;
          moduleHead = m;
       }
@@ -785,9 +872,9 @@ void loadModuleList(Buffer &b) {
 
 void saveModuleList(Buffer &b) {
    int n = 0;
-   for (HandleList *p = moduleHead; p; p = p->next) n++;
+   for (HandleNode *p = moduleHead; p; p = p->next) n++;
    b.write((char*)&n, sizeof(n));
-   for (HandleList *m = moduleHead; m; m = m->next) {
+   for (HandleNode *m = moduleHead; m; m = m->next) {
       dword moduleId = m->id | (m->handle & FAKE_HANDLE_BASE); //set high bit of id if using fake handle
       b.write((char*)&moduleId, sizeof(moduleId));
       b.writeString(m->moduleName);
@@ -799,7 +886,7 @@ void loadModuleData(Buffer &b) {
    int n = 0;
    b.read((char*)&n, sizeof(n));
    for (int i = 0; i < n; i++) {
-      HandleList *m = (HandleList*)malloc(sizeof(HandleList));
+      HandleNode *m = (HandleNode*)malloc(sizeof(HandleNode));
       m->next = moduleHead;
       moduleHead = m;
 
@@ -829,9 +916,9 @@ void loadModuleData(Buffer &b) {
 
 void saveModuleData(Buffer &b) {
    int n = 0;
-   for (HandleList *p = moduleHead; p; p = p->next) n++;
+   for (HandleNode *p = moduleHead; p; p = p->next) n++;
    b.write((char*)&n, sizeof(n));
-   for (HandleList *m = moduleHead; m; m = m->next) {
+   for (HandleNode *m = moduleHead; m; m = m->next) {
       b.write((char*)&m->handle, sizeof(m->handle));
       b.write((char*)&m->id, sizeof(m->id));
       b.write((char*)&m->maxAddr, sizeof(m->maxAddr));
@@ -943,6 +1030,838 @@ void emu_GetCommandLineA(dword /*addr*/) {
    eax = pCmdLineA;
    if (doLogLib) {
       msg("call: GetCommandLineA() = 0x%x\n", eax);
+   }
+}
+
+//*** this needs more work
+//common core for GetStartupInfoX
+void emu_GetStartupInfo(dword lpStartupInfo, dword pp) {
+   patch_long(lpStartupInfo, 0x44);   //cb = sizeof(STARTUPINFO)
+
+   patch_long(lpStartupInfo + 4, 0);   //lpReserved
+
+   patch_long(lpStartupInfo + 0x20, 0);   //dwFillAttribute
+   patch_word(lpStartupInfo + 0x30, 1);   //wShowWindow == SW_SHOWNORMAL
+   patch_word(lpStartupInfo + 0x32, 0);   //cbReserved2
+   patch_long(lpStartupInfo + 0x34, 0);   //lpReserved2
+
+   patch_long(lpStartupInfo + 0x38, get_long(pp + 0x18));   //hStdInput
+   patch_long(lpStartupInfo + 0x3C, get_long(pp + 0x1C));   //hStdOutput
+   patch_long(lpStartupInfo + 0x40, get_long(pp + 0x20));   //hStdError
+}
+
+void emu_GetStartupInfoA(dword /*addr*/) {
+   //this can raise an exception, but which one?
+   dword lpStartupInfo = pop(SIZE_DWORD);
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+
+   patch_long(lpStartupInfo + 8, get_long(pp + SIZEOF_PROCESS_PARAMETERS + 4));   //DesktopInfo
+   patch_long(lpStartupInfo + 12, get_long(pp + SIZEOF_PROCESS_PARAMETERS));   //WindowTitle
+
+   emu_GetStartupInfo(lpStartupInfo, pp);
+   if (doLogLib) {
+      msg("call: GetStartupInfoA(0x%x)\n", lpStartupInfo);
+   }
+}
+
+void emu_GetStartupInfoW(dword /*addr*/) {
+   dword lpStartupInfo = pop(SIZE_DWORD);
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+
+   patch_long(lpStartupInfo + 8, get_long(pp + 0x7C));   //DesktopInfo
+   patch_long(lpStartupInfo + 12, get_long(pp + 0x74));   //WindowTitle
+   emu_GetStartupInfo(lpStartupInfo, pp);
+   if (doLogLib) {
+      msg("call: GetStartupInfoW(0x%x)\n", lpStartupInfo);
+   }
+}
+
+void emu_GetLocaleInfoA(dword /*addr*/) {
+   dword Locale = pop(SIZE_DWORD);
+   dword LCType = pop(SIZE_DWORD);
+   dword lpLCData = pop(SIZE_DWORD);
+   dword cchData = pop(SIZE_DWORD);
+
+   eax = 1;
+   switch (Locale) {
+      case 0:
+      case 1033:
+      case 0x400: //LOCALE_USER_DEFAULT
+      case 0x800: //LOCALE_SYSTEM_DEFAULT
+         break;   
+      default:
+         eax = 0;
+         setThreadError(87);   //ERROR_INVALID_PARAMETER
+         break;
+   }
+   if (eax) {  //no error yet
+      switch (LCType) {
+         case 0x1004:  //LOCALE_IDEFAULTANSICODEPAGE
+            //hard coded to code page 1252
+            if (cchData == 0) {
+               eax = 5; //"1252"
+            }
+            else if (lpLCData == 0 || cchData < 5) {
+               eax = 0;   
+               setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+            }
+            else {
+               put_many_bytes(lpLCData, "1252", 5);
+            }
+            break;
+         case 0x1001:  //LOCALE_SENGLANGUAGE
+            //hard coded to English
+            if (cchData == 0) {
+               eax = 8; //"English"
+            }
+            else if (lpLCData == 0 || cchData < 8) {
+               eax = 0;   
+               setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+            }
+            else {
+               put_many_bytes(lpLCData, "English", 8);
+            }
+            break;
+         case 0x1002:  //LOCALE_SENGCOUNTRY
+            //hard coded to "United States"
+            if (cchData == 0) {
+               eax = 14; //"United States"
+            }
+            else if (lpLCData == 0 || cchData < 14) {
+               eax = 0;
+               setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+            }
+            else {
+               put_many_bytes(lpLCData, "United States", 14);
+            }
+            break;
+         default:
+            eax = 0;
+            setThreadError(87);   //ERROR_INVALID_PARAMETER
+            break;
+      }
+   }
+   
+   if (doLogLib) {
+      msg("call: GetLocaleInfoA(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+                  Locale, LCType, lpLCData, cchData, eax);
+   }
+}
+
+void emu_GetLocaleInfoW(dword /*addr*/) {
+   dword Locale = pop(SIZE_DWORD);
+   dword LCType = pop(SIZE_DWORD);
+   dword lpLCData = pop(SIZE_DWORD);
+   dword cchData = pop(SIZE_DWORD);
+
+   eax = 1;
+   switch (Locale) {
+      case 0:
+      case 1033:
+      case 0x400: //LOCALE_USER_DEFAULT
+      case 0x800: //LOCALE_SYSTEM_DEFAULT
+         break;   
+      default:
+         eax = 0;
+         setThreadError(87);   //ERROR_INVALID_PARAMETER
+         break;
+   }
+   if (eax) {  //no error yet
+      switch (LCType) {
+         case 0x1004:  //LOCALE_IDEFAULTANSICODEPAGE
+            //hard coded to code page 1252
+            if (cchData == 0) {
+               eax = 5; //"1252"
+            }
+            else if (lpLCData == 0 || cchData < 5) {
+               eax = 0;   
+               setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+            }
+            else {
+               put_many_bytes(lpLCData, "\x31\x00\x32\x00\x35\x00\x32\x00\x00\x00", 10);
+            }
+            break;
+         case 0x1001:  //LOCALE_SENGLANGUAGE
+            //hard coded to English
+            if (cchData == 0) {
+               eax = 8; //"English"
+            }
+            else if (lpLCData == 0 || cchData < 8) {
+               eax = 0;   
+               setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+            }
+            else {
+               put_many_bytes(lpLCData, "\x45\x00\x6e\x00\x67\x00\x6c\x00\x69\x00\x73\x00\x68\x00\x00\x00", 16);
+            }
+            break;
+         case 0x1002:  //LOCALE_SENGCOUNTRY
+            //hard coded to "United States"
+            if (cchData == 0) {
+               eax = 14; //"United States"
+            }
+            else if (lpLCData == 0 || cchData < 14) {
+               eax = 0;
+               setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+            }
+            else {
+               put_many_bytes(lpLCData, "\x55\x00\x6e\x00\x69\x00\x74\x00\x65\x00\x64\x00\x20\x00\x53\x00\x74\x00\x61\x00\x74\x00\x65\x00\x73\x00\x00\x00", 28);
+            }
+            break;
+         default:
+            eax = 0;
+            setThreadError(87);   //ERROR_INVALID_PARAMETER
+            break;
+      }
+   }
+
+   if (doLogLib) {
+      msg("call: GetLocaleInfoW(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+                  Locale, LCType, lpLCData, cchData, eax);
+   }
+}
+
+static char wcmbdata[] =
+   "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
+   "\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20"
+   "\x21\x22\x23\x24\x25\x26\x27\x28\x29\x2a\x2b\x2c\x2d\x2e\x2f\x30"
+   "\x31\x32\x33\x34\x35\x36\x37\x38\x39\x3a\x3b\x3c\x3d\x3e\x3f\x40"
+   "\x41\x42\x43\x44\x45\x46\x47\x48\x49\x4a\x4b\x4c\x4d\x4e\x4f\x50"
+   "\x51\x52\x53\x54\x55\x56\x57\x58\x59\x5a\x5b\x5c\x5d\x5e\x5f\x60"
+   "\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6a\x6b\x6c\x6d\x6e\x6f\x70"
+   "\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7a\x7b\x7c\x7d\x7e\x7f\x3f"
+   "\x81\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x8d\x3f\x8f\x90"
+   "\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x3f\x9d\x3f\x3f\xa0"
+   "\xa1\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xab\xac\xad\xae\xaf\xb0"
+   "\xb1\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xbb\xbc\xbd\xbe\xbf\xc0"
+   "\xc1\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xcb\xcc\xcd\xce\xcf\xd0"
+   "\xd1\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xdb\xdc\xdd\xde\xdf\xe0"
+   "\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf0"
+   "\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff";
+
+void emu_WideCharToMultiByte(dword /*addr*/) {
+   dword CodePage = pop(SIZE_DWORD);
+   dword dwFlags = pop(SIZE_DWORD);   //*** update, don't ignore this
+   dword lpWideCharStr = pop(SIZE_DWORD);
+   dword cchWideChar = pop(SIZE_DWORD);
+   dword lpMultiByteStr = pop(SIZE_DWORD);
+   dword cbMultiByte = pop(SIZE_DWORD);
+   dword lpDefaultChar = pop(SIZE_DWORD);  //*** update, don't ignore this
+   dword lpUsedDefaultChar = pop(SIZE_DWORD);  //*** update, don't ignore this
+
+   if (lpWideCharStr == lpMultiByteStr || cchWideChar == 0) {
+      eax = 0;
+      setThreadError(87);   //ERROR_INVALID_PARAMETER
+   }
+   else {
+      eax = 1;
+      switch (CodePage) {
+         case 0:
+         case 1:
+         case 437:  //(US)
+         case 0x4e4:  //1252 == Latin I
+         case 0xfde9: //CP_UTF8
+            if (cchWideChar == 0xffffffff) {
+               cchWideChar++;
+               while (get_word(lpWideCharStr + cchWideChar * 2) != 0) {
+                  cchWideChar++;
+               }
+               cchWideChar++;
+            }
+            if (cbMultiByte == 0) {
+               eax = cchWideChar;
+            }
+            else {
+               dword i;
+               for (i = 0; i < cchWideChar; i++) {
+                  unsigned short ch = get_word(lpWideCharStr + i * 2);
+                  if (ch > 255) {
+                     //*** no idea whether this is generally correct
+                     ch = '?';
+                  }
+                  else {
+                     ch = wcmbdata[ch];
+                  }
+                  patch_byte(lpMultiByteStr + i, ch);
+               }
+               eax = i;
+            }
+            break;
+         default:
+            eax = 0;
+            setThreadError(87);   //ERROR_INVALID_PARAMETER
+            break;
+      }
+   }   
+   if (doLogLib) {
+      msg("call: WideCharToMultiByte(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+                  CodePage, dwFlags, lpWideCharStr, cchWideChar, 
+                  lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar, eax);
+   }
+}
+
+static const unsigned short *mbwcdata = (const unsigned short *)
+   "\x00\x00\x01\x00\x02\x00\x03\x00\x04\x00\x05\x00\x06\x00\x07\x00\x08\x00"
+   "\x09\x00\x0a\x00\x0b\x00\x0c\x00\x0d\x00\x0e\x00\x0f\x00\x10\x00"
+   "\x11\x00\x12\x00\x13\x00\x14\x00\x15\x00\x16\x00\x17\x00\x18\x00"
+   "\x19\x00\x1a\x00\x1b\x00\x1c\x00\x1d\x00\x1e\x00\x1f\x00\x20\x00"
+   "\x21\x00\x22\x00\x23\x00\x24\x00\x25\x00\x26\x00\x27\x00\x28\x00"
+   "\x29\x00\x2a\x00\x2b\x00\x2c\x00\x2d\x00\x2e\x00\x2f\x00\x30\x00"
+   "\x31\x00\x32\x00\x33\x00\x34\x00\x35\x00\x36\x00\x37\x00\x38\x00"
+   "\x39\x00\x3a\x00\x3b\x00\x3c\x00\x3d\x00\x3e\x00\x3f\x00\x40\x00"
+   "\x41\x00\x42\x00\x43\x00\x44\x00\x45\x00\x46\x00\x47\x00\x48\x00"
+   "\x49\x00\x4a\x00\x4b\x00\x4c\x00\x4d\x00\x4e\x00\x4f\x00\x50\x00"
+   "\x51\x00\x52\x00\x53\x00\x54\x00\x55\x00\x56\x00\x57\x00\x58\x00"
+   "\x59\x00\x5a\x00\x5b\x00\x5c\x00\x5d\x00\x5e\x00\x5f\x00\x60\x00"
+   "\x61\x00\x62\x00\x63\x00\x64\x00\x65\x00\x66\x00\x67\x00\x68\x00"
+   "\x69\x00\x6a\x00\x6b\x00\x6c\x00\x6d\x00\x6e\x00\x6f\x00\x70\x00"
+   "\x71\x00\x72\x00\x73\x00\x74\x00\x75\x00\x76\x00\x77\x00\x78\x00"
+   "\x79\x00\x7a\x00\x7b\x00\x7c\x00\x7d\x00\x7e\x00\x7f\x00\xac\x20"
+   "\x81\x00\x1a\x20\x92\x01\x1e\x20\x26\x20\x20\x20\x21\x20\xc6\x02"
+   "\x30\x20\x60\x01\x39\x20\x52\x01\x8d\x00\x7d\x01\x8f\x00\x90\x00"
+   "\x18\x20\x19\x20\x1c\x20\x1d\x20\x22\x20\x13\x20\x14\x20\xdc\x02"
+   "\x22\x21\x61\x01\x3a\x20\x53\x01\x9d\x00\x7e\x01\x78\x01\xa0\x00"
+   "\xa1\x00\xa2\x00\xa3\x00\xa4\x00\xa5\x00\xa6\x00\xa7\x00\xa8\x00"
+   "\xa9\x00\xaa\x00\xab\x00\xac\x00\xad\x00\xae\x00\xaf\x00\xb0\x00"
+   "\xb1\x00\xb2\x00\xb3\x00\xb4\x00\xb5\x00\xb6\x00\xb7\x00\xb8\x00"
+   "\xb9\x00\xba\x00\xbb\x00\xbc\x00\xbd\x00\xbe\x00\xbf\x00\xc0\x00"
+   "\xc1\x00\xc2\x00\xc3\x00\xc4\x00\xc5\x00\xc6\x00\xc7\x00\xc8\x00"
+   "\xc9\x00\xca\x00\xcb\x00\xcc\x00\xcd\x00\xce\x00\xcf\x00\xd0\x00"
+   "\xd1\x00\xd2\x00\xd3\x00\xd4\x00\xd5\x00\xd6\x00\xd7\x00\xd8\x00"
+   "\xd9\x00\xda\x00\xdb\x00\xdc\x00\xdd\x00\xde\x00\xdf\x00\xe0\x00"
+   "\xe1\x00\xe2\x00\xe3\x00\xe4\x00\xe5\x00\xe6\x00\xe7\x00\xe8\x00"
+   "\xe9\x00\xea\x00\xeb\x00\xec\x00\xed\x00\xee\x00\xef\x00\xf0\x00"
+   "\xf1\x00\xf2\x00\xf3\x00\xf4\x00\xf5\x00\xf6\x00\xf7\x00\xf8\x00"
+   "\xf9\x00\xfa\x00\xfb\x00\xfc\x00\xfd\x00\xfe\x00\xff\x00";
+   
+void emu_MultiByteToWideChar(dword /*addr*/) {
+   dword CodePage = pop(SIZE_DWORD);
+   dword dwFlags = pop(SIZE_DWORD);
+   dword lpMultiByteStr = pop(SIZE_DWORD);
+   dword cbMultiByte = pop(SIZE_DWORD);
+   dword lpWideCharStr = pop(SIZE_DWORD);
+   dword cchWideChar = pop(SIZE_DWORD);
+
+   if (lpWideCharStr == lpMultiByteStr || cbMultiByte == 0) {
+      eax = 0;
+      setThreadError(87);   //ERROR_INVALID_PARAMETER
+   }
+   else {
+      eax = 1;
+      switch (CodePage) {
+         case 0:
+         case 1:
+         case 437:  //(US)
+         case 0x4e4:  //1252 == Latin I
+         case 0xfde9: //CP_UTF8
+            if (cbMultiByte == 0xffffffff) {
+               cbMultiByte++;
+               while (get_byte(lpMultiByteStr + cbMultiByte) != 0) {
+                  cbMultiByte++;
+               }
+               cbMultiByte++;
+            }
+            if (cchWideChar == 0) {
+               eax = cbMultiByte;
+            }
+            else {
+               dword i;
+               for (i = 0; i < cbMultiByte; i++) {
+                  unsigned short ch = get_byte(lpMultiByteStr + i);
+                  ch = mbwcdata[ch];
+                  patch_word(lpWideCharStr + i * 2, ch);
+               }
+               eax = i;
+            }
+            break;
+         default:
+            eax = 0;
+            setThreadError(87);   //ERROR_INVALID_PARAMETER
+            break;
+      }
+   }   
+
+   if (doLogLib) {
+      msg("call: MultiByteToWideChar(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", 
+                 CodePage, dwFlags, lpMultiByteStr, 
+                 cbMultiByte, lpWideCharStr, cchWideChar, eax);
+   }
+}
+
+static const unsigned short *typeW = (const unsigned short *)
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02"
+   "\x68\x02\x28\x02\x28\x02\x28\x02\x28\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x48\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x84\x02"
+   "\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02"
+   "\x84\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x81\x03\x81\x03\x81\x03\x81\x03\x81\x03\x81\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x82\x03\x82\x03\x82\x03\x82\x03\x82\x03\x82\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x10\x02\x10\x02\x10\x02\x10\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x28\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x48\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x10\x02\x12\x03\x10\x02\x10\x02\x30\x02\x10\x02\x10\x02\x10\x02"
+   "\x10\x02\x14\x02\x14\x02\x10\x02\x12\x03\x10\x02\x10\x02\x10\x02"
+   "\x14\x02\x12\x03\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x10\x02\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x10\x02\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03";
+   
+void emu_GetStringTypeW(dword /*addr*/) {
+   dword dwInfoType = pop(SIZE_DWORD);
+   dword lpSrcStr = pop(SIZE_DWORD);
+   int cchSrc = (int)pop(SIZE_DWORD);
+   dword lpCharType = pop(SIZE_DWORD);
+
+   if (dwInfoType != 1) {
+      //*** handle additional dwInfoType values
+      eax = 0;
+      setThreadError(87);   //ERROR_INVALID_PARAMETER
+   }
+   else {
+      unsigned short ch;
+      eax = 1;
+      if (cchSrc < 0) {
+         int i = 0;
+         do {
+            ch = get_word(lpSrcStr + i * 2);
+            patch_word(lpCharType + i * 2, ch < 256 ? typeW[ch] : 0); //0 is certainly not correct default here
+            i++;
+         } while (ch != 0);
+      }
+      else {
+         for (int i = 0; i < cchSrc; i++) {
+            ch = get_word(lpSrcStr + i * 2);
+            patch_word(lpCharType + i * 2, ch < 256 ? typeW[ch] : 0); //0 is certainly not correct default here
+         }
+      }
+   }
+   
+   if (doLogLib) {
+      msg("call: GetStringTypeW(0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", 
+                 dwInfoType, lpSrcStr, cchSrc, lpCharType, eax);
+   }
+}
+
+static const unsigned short *typeA = (const unsigned short *)
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02"
+   "\x68\x02\x28\x02\x28\x02\x28\x02\x28\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02"
+   "\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x20\x02\x48\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x84\x02"
+   "\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02\x84\x02"
+   "\x84\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x81\x03\x81\x03\x81\x03\x81\x03\x81\x03\x81\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x82\x03\x82\x03\x82\x03\x82\x03\x82\x03\x82\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x10\x02\x10\x02\x10\x02\x10\x02\x20\x02\x00\x02"
+   "\x20\x02\x10\x02\x02\x03\x10\x02\x10\x02\x10\x02\x10\x02\x00\x02"
+   "\x10\x02\x01\x03\x10\x02\x01\x03\x20\x02\x01\x03\x20\x02\x20\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x00\x02"
+   "\x00\x02\x02\x03\x10\x02\x02\x03\x20\x02\x02\x03\x01\x03\x48\x02"
+   "\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02"
+   "\x10\x02\x12\x03\x10\x02\x10\x02\x30\x02\x10\x02\x10\x02\x10\x02"
+   "\x10\x02\x14\x02\x14\x02\x10\x02\x12\x03\x10\x02\x10\x02\x10\x02"
+   "\x14\x02\x12\x03\x10\x02\x10\x02\x10\x02\x10\x02\x10\x02\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x10\x02\x01\x03"
+   "\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x01\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x10\x02\x02\x03"
+   "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03";
+   
+void emu_GetStringTypeA(dword /*addr*/) {
+   dword Locale = pop(SIZE_DWORD);
+   dword dwInfoType = pop(SIZE_DWORD);
+   dword lpSrcStr = pop(SIZE_DWORD);
+   int cchSrc = (int)pop(SIZE_DWORD);
+   dword lpCharType = pop(SIZE_DWORD);
+
+   if (dwInfoType != 1) {
+      //*** handle additional dwInfoType values
+      eax = 0;
+      setThreadError(87);   //ERROR_INVALID_PARAMETER
+   }
+   else {
+      eax = 1;
+      switch (Locale) {
+         case 0x0409: { //1033
+            unsigned char ch;
+            if (cchSrc < 0) {
+               int i = 0;
+               do {
+                  ch = get_byte(lpSrcStr + i);
+                  patch_word(lpCharType + i * 2, typeA[ch]);
+                  i++;
+               } while (ch != 0);
+            }
+            else {
+               for (int i = 0; i < cchSrc; i++) {
+                  patch_word(lpCharType + i * 2, typeA[get_byte(lpSrcStr + i)]);
+               }
+            }
+            break;
+         }
+         default:
+            eax = 0;
+            setThreadError(87);   //ERROR_INVALID_PARAMETER
+            break;
+      }
+   }
+   if (doLogLib) {
+      msg("call: GetStringTypeA(0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", 
+                 Locale, dwInfoType, lpSrcStr, cchSrc, lpCharType, eax);
+   }
+}
+
+//*** need implementations for things other than lower and upper
+void emu_LCMapStringW(dword /*addr*/) {
+   dword Locale = pop(SIZE_DWORD);
+   dword dwMapFlags = pop(SIZE_DWORD);
+   dword lpSrcStr = pop(SIZE_DWORD);
+   dword cchSrc = pop(SIZE_DWORD);
+   dword lpDestStr = pop(SIZE_DWORD);
+   dword cchDest = pop(SIZE_DWORD);
+
+   eax = 1;
+   
+   if (lpSrcStr == 0 || cchSrc == 0) {
+      eax = 0;
+      setThreadError(87);   //ERROR_INVALID_PARAMETER
+   }
+   else {
+      if (cchSrc < 0) {
+         unsigned short ch;
+         cchSrc = 0;
+         do {
+            ch = get_word(lpSrcStr + cchSrc);
+            cchSrc++;
+         } while (ch != 0);
+      }
+      if (cchDest && (cchDest < cchSrc)) {
+         eax = 0;
+         setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+      }
+      else {
+         switch (dwMapFlags) {
+            case 0x100: //LCMAP_LOWERCASE
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else {
+                  for (dword i = 0; i < cchSrc; i++) {
+                     patch_word(lpDestStr + i * 2, tolower(get_word(lpSrcStr + i * 2)));
+                  }
+               }
+               break;
+            case 0x200: //LCMAP_UPPERCASE
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else {
+                  for (dword i = 0; i < cchSrc; i++) {
+                     patch_word(lpDestStr + i * 2, toupper(get_word(lpSrcStr + i * 2)));
+                  }
+               }
+               break;
+            case 0x400: //LCMAP_SORTKEY
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else if (lpSrcStr == lpDestStr) {
+                  eax = 0;
+                  setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+               }
+               break;
+            case 0x800: //LCMAP_BYTEREV
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else if (lpSrcStr == lpDestStr) {
+                  eax = 0;
+                  setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+               }
+               break;
+            case 0x100000: //LCMAP_HIRAGANA
+               //break;
+            case 0x200000: //LCMAP_KATAKANA
+               //break;
+            case 0x400000: //LCMAP_HALFWIDTH
+               //break;
+            case 0x800000: //LCMAP_FULLWIDTH
+               //break;
+            case 0x1000000: //LCMAP_LINGUISTIC_CASING
+               //break;
+            case 0x2000000: //LCMAP_SIMPLIFIED_CHINESE
+               break;
+            case 0x4000000: //LCMAP_TRADITIONAL_CHINESE
+               //break;
+            default:
+               eax = 0;
+               setThreadError(87);   //ERROR_INVALID_PARAMETER
+               break;         
+         }
+      }
+   }
+
+   if (doLogLib) {
+      msg("call: LCMapStringW(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n", 
+                 Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest, eax);
+   }
+}
+
+//*** need implementations for things other than lower and upper
+void emu_LCMapStringA(dword /*addr*/) {
+   dword Locale = pop(SIZE_DWORD);
+   dword dwMapFlags = pop(SIZE_DWORD);
+   dword lpSrcStr = pop(SIZE_DWORD);
+   dword cchSrc = pop(SIZE_DWORD);
+   dword lpDestStr = pop(SIZE_DWORD);
+   dword cchDest = pop(SIZE_DWORD);
+
+   eax = 1;
+   
+   if (lpSrcStr == 0 || cchSrc == 0) {
+      eax = 0;
+      setThreadError(87);   //ERROR_INVALID_PARAMETER
+   }
+   else {
+      if (cchSrc < 0) {
+         unsigned char ch;
+         cchSrc = 0;
+         do {
+            ch = get_byte(lpSrcStr + cchSrc);
+            cchSrc++;
+         } while (ch != 0);
+      }
+      if (cchDest && (cchDest < cchSrc)) {
+         eax = 0;
+         setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+      }
+      else {
+         switch (dwMapFlags) {
+            case 0x100: //LCMAP_LOWERCASE
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else {
+                  for (dword i = 0; i < cchSrc; i++) {
+                     patch_byte(lpDestStr + i, tolower(get_byte(lpSrcStr + i)));
+                  }
+               }
+               break;
+            case 0x200: //LCMAP_UPPERCASE
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else {
+                  for (dword i = 0; i < cchSrc; i++) {
+                     patch_byte(lpDestStr + i, toupper(get_byte(lpSrcStr + i)));
+                  }
+               }
+               break;
+            case 0x400: //LCMAP_SORTKEY
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else if (lpSrcStr == lpDestStr) {
+                  eax = 0;
+                  setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+               }
+               break;
+            case 0x800: //LCMAP_BYTEREV
+               if (cchDest == 0) {
+                  eax = cchSrc;
+               }
+               else if (lpSrcStr == lpDestStr) {
+                  eax = 0;
+                  setThreadError(122);   //ERROR_INSUFFICIENT_BUFFER
+               }
+               break;
+            case 0x100000: //LCMAP_HIRAGANA
+               //break;
+            case 0x200000: //LCMAP_KATAKANA
+               //break;
+            case 0x400000: //LCMAP_HALFWIDTH
+               //break;
+            case 0x800000: //LCMAP_FULLWIDTH
+               //break;
+            case 0x1000000: //LCMAP_LINGUISTIC_CASING
+               //break;
+            case 0x2000000: //LCMAP_SIMPLIFIED_CHINESE
+               break;
+            case 0x4000000: //LCMAP_TRADITIONAL_CHINESE
+               //break;
+            default:
+               eax = 0;
+               setThreadError(87);   //ERROR_INVALID_PARAMETER
+               break;         
+         }
+      }
+   }
+   if (doLogLib) {
+      msg("call: LCMapStringA(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) = 0x%x\n",
+                 Locale, dwMapFlags, lpSrcStr, cchSrc, lpDestStr, cchDest, eax);
+   }
+}
+
+//*** need more code pages
+void emu_GetCPInfo(dword /*addr*/) {
+   dword CodePage = pop(SIZE_DWORD);
+   dword lpCPInfo = pop(SIZE_DWORD);
+   
+   eax = 1;
+   switch (CodePage) {
+      case 0:
+      case 1:
+      case 437:  //(US)
+      case 0x4e4:  //1252 == Latin I
+         patch_long(lpCPInfo, 1);
+         patch_word(lpCPInfo + 4, '?');
+         patch_word(lpCPInfo + 6, 0);
+         patch_long(lpCPInfo + 8, 0);
+         patch_long(lpCPInfo + 12, 0);
+         patch_long(lpCPInfo + 16, 0);
+         break;
+      default:
+         eax = 0;
+         setThreadError(87);   //ERROR_INVALID_PARAMETER
+         break;
+   }
+   
+   if (doLogLib) {
+      msg("call: GetCPInfo(0x%x, 0x%x) = 0x%x\n", CodePage, lpCPInfo, eax);
+   }
+}
+
+static const char windowsDir[] = "C:\\Windows";
+
+//*** make the return value here configurable
+void emu_GetWindowsDirectoryA(dword /*addr*/) {
+   dword lpBuffer = pop(SIZE_DWORD);
+   dword uSize = pop(SIZE_DWORD);
+
+   if (uSize < sizeof(windowsDir)) {
+      eax = sizeof(windowsDir);
+   }
+   else {
+      eax = sizeof(windowsDir) - 1;
+      for (int i = 0; i < sizeof(windowsDir); i++) {
+         patch_byte(lpBuffer + i, windowsDir[i]);
+      }
+   }
+   
+   if (doLogLib) {
+      msg("call: GetWindowsDirectoryA(0x%x, 0x%x) = 0x%x\n", lpBuffer, uSize, eax);
+   }
+}
+
+//*** make the return value here configurable
+void emu_GetWindowsDirectoryW(dword /*addr*/) {
+   dword lpBuffer = pop(SIZE_DWORD);
+   dword uSize = pop(SIZE_DWORD);
+
+   if (uSize < sizeof(windowsDir)) {
+      eax = sizeof(windowsDir);
+   }
+   else {
+      eax = sizeof(windowsDir) - 1;
+      for (int i = 0; i < sizeof(windowsDir); i++) {
+         patch_word(lpBuffer + i * 2, windowsDir[i]);
+      }
+   }
+
+   if (doLogLib) {
+      msg("call: GetWindowsDirectoryW(0x%x, 0x%x) = 0x%x\n", lpBuffer, uSize, eax);
+   }
+}
+
+static const char systemDir[] = "C:\\Windows\\System32";
+
+//*** make the return value here configurable
+void emu_GetSystemDirectoryA(dword /*addr*/) {
+   dword lpBuffer = pop(SIZE_DWORD);
+   dword uSize = pop(SIZE_DWORD);
+
+   if (uSize < sizeof(systemDir)) {
+      eax = sizeof(systemDir);
+   }
+   else {
+      eax = sizeof(systemDir) - 1;
+      for (int i = 0; i < sizeof(systemDir); i++) {
+         patch_byte(lpBuffer + i, systemDir[i]);
+      }
+   }
+   
+   if (doLogLib) {
+      msg("call: GetSystemDirectoryA(0x%x, 0x%x) = 0x%x\n", lpBuffer, uSize, eax);
+   }
+}
+
+//*** make the return value here configurable
+void emu_GetSystemDirectoryW(dword /*addr*/) {
+   dword lpBuffer = pop(SIZE_DWORD);
+   dword uSize = pop(SIZE_DWORD);
+
+   if (uSize < sizeof(systemDir)) {
+      eax = sizeof(systemDir);
+   }
+   else {
+      eax = sizeof(systemDir) - 1;
+      for (int i = 0; i < sizeof(systemDir); i++) {
+         patch_word(lpBuffer + i * 2, systemDir[i]);
+      }
+   }
+
+   if (doLogLib) {
+      msg("call: GetSystemDirectoryW(0x%x, 0x%x) = 0x%x\n", lpBuffer, uSize, eax);
+   }
+}
+
+void emu_GetStdHandle(dword /*addr*/) {
+   dword handle = pop(SIZE_DWORD);
+   dword peb = readDword(fsBase + TEB_PEB_PTR);
+   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+   switch (handle) {
+      case 0xfffffff6:   //STD_INPUT_HANDLE
+         eax = get_long(pp + 0x18);
+         break;
+      case 0xfffffff5:   //STD_OUTPUT_HANDLE
+         eax = get_long(pp + 0x1C);
+         break;
+      case 0xfffffff4:   //STD_ERROR_HANDLE
+         eax = get_long(pp + 0x20);
+         break;
+      default:
+         eax = 0xffffffff;
+         //setThreadError(0xc0000017);   //what error?
+         break;
+   }
+   if (doLogLib) {
+      msg("call: GetStdHandle(0x%x) = 0x%x\n", handle, eax);
    }
 }
 
@@ -2103,7 +3022,7 @@ void emu_NtQuerySystemInformation(dword /*addr*/) {
       case SystemCallTimeInformation:
          break;
       case SystemModuleInformation: {
-         HandleList *hl;
+         HandleNode *hl;
          dword count = 0;
          for (hl = moduleHead; hl; hl = hl->next) {
             count++;
@@ -2407,6 +3326,20 @@ void emu_HeapFree(dword /*addr*/) {
    }
 }
 
+void emu_HeapSize(dword /*addr*/) {
+   dword hHeap = pop(SIZE_DWORD); 
+   dword dwFlags = pop(SIZE_DWORD);
+   dword lpMem = pop(SIZE_DWORD);
+
+   EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
+   eax = h ? h->sizeOf(lpMem) : 0xffffffff;
+
+   if (doLogLib) {
+      msg("call: HeapSize(0x%x, 0x%x, 0x%x) = 0x%x\n", hHeap, dwFlags, lpMem, eax); 
+   }
+
+}
+
 void emu_GlobalAlloc(dword /*addr*/) {
    dword uFlags = pop(SIZE_DWORD); 
    dword dwSize = pop(SIZE_DWORD);
@@ -2520,7 +3453,33 @@ void emu_LocalAlloc(dword /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(dwSize);
    if (doLogLib) {
-      msg("call: VirtualProtect(0x%x, 0x%x) = 0x%x\n", uFlags, dwSize, eax); 
+      msg("call: LocalAlloc(0x%x, 0x%x) = 0x%x\n", uFlags, dwSize, eax); 
+   }
+}
+
+void emu_LocalLock(dword /*addr*/) {
+   eax = pop(SIZE_DWORD); //***need to implement a locking mechanism
+   if (doLogLib) {
+      msg("call: LocalLock(0x%x) = 0x%x\n", eax, eax); 
+   }
+}
+
+void emu_LocalUnlock(dword /*addr*/) {
+   dword hMem = pop(SIZE_DWORD);
+   eax = 1;       //***need to implement a locking mechanism
+   if (doLogLib) {
+      msg("call: LocalUnlock(0x%x) = 0x%x\n", hMem, eax); 
+   }
+}
+
+void emu_LocalReAlloc(dword /*addr*/) {
+   dword hMem = pop(SIZE_DWORD); 
+   dword uBytes = pop(SIZE_DWORD);
+   dword uFlags = pop(SIZE_DWORD); 
+   EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
+   eax = p->realloc(hMem, uBytes);
+   if (doLogLib) {
+      msg("call: LocalReAlloc(0x%x, 0x%x, 0x%x) = 0x%x\n", hMem, uBytes, uFlags, eax); 
    }
 }
 
@@ -2549,19 +3508,22 @@ hookfunc checkForHook(char *funcName, dword funcAddr, dword moduleId) {
 dword myGetProcAddress(dword hModule, dword lpProcName) {
    dword h = 0;
    char *procName = NULL;
-   HandleList *m = findModuleByHandle(hModule);
+   HandleNode *m = findModuleByHandle(hModule);
    if (m == NULL) return 0;
    if (lpProcName < 0x10000) {
       //getting function by ordinal value
       char *dot;
       int len = strlen(m->moduleName) + 16;
       procName = (char*) malloc(len);
-      ::qsnprintf(procName, len, "%s_0x%4.4X", m->moduleName, m->handle);
+      ::qsnprintf(procName, len, "%s_0x%4.4X", m->moduleName, lpProcName);
       dot = strchr(procName, '.');
       if (dot) *dot = '_';
       if ((m->handle & FAKE_HANDLE_BASE) == 0) {
          lpProcName -= m->ordinal_base;
-         h = get_long(m->eat + lpProcName * 4) + m->handle;
+         dword rva = get_long(m->eat + lpProcName * 4);
+         if (rva) {
+            h = rva + m->handle;
+         }
       }
       else {
          //need a fake procaddress when faking module handle
@@ -2583,7 +3545,10 @@ dword myGetProcAddress(dword hModule, dword lpProcName) {
             if (res == 0) {
                free(name);
                lpProcName = get_word(m->eot + mid * 2); // - m->ordinal_base;
-               h = get_long(m->eat + lpProcName * 4) + m->handle;
+               dword rva = get_long(m->eat + lpProcName * 4);
+               if (rva) {
+                  h = rva + m->handle;
+               }
                break;
             }
             else if (res < 0) lo = mid + 1;
@@ -2603,7 +3568,7 @@ dword myGetProcAddress(dword hModule, dword lpProcName) {
 
 dword myGetProcAddress(dword hModule, const char *procName) {
    dword h = 0;
-   HandleList *m = findModuleByHandle(hModule);
+   HandleNode *m = findModuleByHandle(hModule);
    if (m == NULL) return 0;
    if ((m->handle & FAKE_HANDLE_BASE) == 0) {
       //binary search through export table to match lpProcName
@@ -2616,7 +3581,10 @@ dword myGetProcAddress(dword hModule, const char *procName) {
          if (res == 0) {
             free(name);
             dword lpProcName = get_word(m->eot + mid * 2); // - m->ordinal_base;
-            h = get_long(m->eat + lpProcName * 4) + m->handle;
+            dword rva = get_long(m->eat + lpProcName * 4);
+            if (rva) {
+               h = rva + m->handle;
+            }
             break;
          }
          else if (res < 0) lo = mid + 1;
@@ -2636,37 +3604,50 @@ void emu_GetProcAddress(dword /*addr*/) {
    char *procName = NULL;
    int i;
    eax = myGetProcAddress(hModule, lpProcName);
-   HandleList *m = findModuleByHandle(hModule);
-   procName = reverseLookupExport(eax);
+   if (eax) {
+      HandleNode *m = findModuleByHandle(hModule);
+      procName = reverseLookupExport(eax);
 #ifdef DEBUG
-   msg("x86emu: GetProcAddress called: %s", procName);
+      msg("x86emu: GetProcAddress called: %s", procName);
 #endif
-   //first see if this function is already hooked
-   if (procName && findHookByAddr(eax) == NULL) {
-      //this is where we need to check if auto hooking is turned on else if (autohook) {
-      //if it wasn't hooked, see if there is an emulation for it
-      //use h to replace "address" and "bad" below
-      for (i = 0; hookTable[i].fName; i++) {
-         if (!strcmp(hookTable[i].fName, procName)) {
-            //if there is an emulation, hook it
-            if (eax == 0) eax = address++;
-            addHook(procName, eax, hookTable[i].func, m ? m->id : 0);
-            break;
+      //first see if this function is already hooked
+      if (procName && findHookByAddr(eax) == NULL) {
+         //this is where we need to check if auto hooking is turned on else if (autohook) {
+         //if it wasn't hooked, see if there is an emulation for it
+         //use h to replace "address" and "bad" below
+         for (i = 0; hookTable[i].fName; i++) {
+            if (!strcmp(hookTable[i].fName, procName)) {
+               //if there is an emulation, hook it
+               if (eax == 0) eax = address++;
+               addHook(procName, eax, hookTable[i].func, m ? m->id : 0);
+               break;
+            }
+         }
+         if (hookTable[i].fName == NULL) {
+            //there is no emulation, pass all calls to the "unemulated" stub
+            if (eax == 0) eax = bad--;
+            addHook(procName, eax, unemulated, m ? m->id : 0);
          }
       }
-      if (hookTable[i].fName == NULL) {
-         //there is no emulation, pass all calls to the "unemulated" stub
-         if (eax == 0) eax = bad--;
-         addHook(procName, eax, unemulated, m ? m->id : 0);
+      else {
       }
    }
    else {
+      //lookup failed
    }
 #ifdef DEBUG
    msg(" (0x%X)\n", eax);
 #endif
    if (doLogLib) {
-      msg("call: GetProcAddress(0x%x, \"%s\") = 0x%x\n", hModule, procName, eax); 
+      if (lpProcName < 0x1000) {
+         msg("call: GetProcAddress(0x%x, 0x%4.4x) = 0x%x\n", hModule, lpProcName, eax); 
+      }
+      else {
+         if (procName == NULL) {
+            procName = getString(lpProcName);
+         }
+         msg("call: GetProcAddress(0x%x, \"%s\") = 0x%x\n", hModule, procName, eax); 
+      }
    }
    free(procName);
 }
@@ -2681,22 +3662,30 @@ void makeImportLabel(dword addr, dword val) {
       do_unknown(addr + cnt, true); //undefine it
    }
    doDwrd(addr, 4);
-   char *name = reverseLookupExport(val);
-   if (name && !set_name(addr, name, SN_NOCHECK | SN_NOWARN)) { //failed, probably duplicate name
-      //undefine old name and retry once
-      dword oldName = (dword)get_name_ea(BADADDR, name);
-      if (oldName != (dword)BADADDR && del_global_name(oldName)) {
-         set_name(addr, name, SN_NOCHECK | SN_NOWARN);
+   if (val) {
+      char *name = reverseLookupExport(val);
+      if (name && !set_name(addr, name, SN_NOCHECK | SN_NOWARN)) { //failed, probably duplicate name
+         //add numeric suffix until we find an available name
+         int nlen = strlen(name) + 32;
+         char *newName = (char*)malloc(nlen);
+         int idx = 0;
+         while (1) {
+            ::qsnprintf(newName, nlen, "%s_%d", name, idx++);
+            if (set_name(addr, newName, SN_NOCHECK | SN_NOWARN)) {
+               break;
+            }
+         }
+         free(newName);
       }
+      free(name);
    }
-   free(name);
 }
 
-HandleList *moduleCommonA(dword /*addr*/) {
+HandleNode *moduleCommonA(dword /*addr*/) {
    dword lpModName = pop(SIZE_DWORD);
    char *modName = getString(lpModName);
    modName = checkModuleExtension(modName);
-   HandleList *m = findModuleByName(modName);
+   HandleNode *m = findModuleByName(modName);
    if (m) {
       free(modName);
    }
@@ -2711,11 +3700,11 @@ HandleList *moduleCommonA(dword /*addr*/) {
    return m;
 }
 
-HandleList *moduleCommonW(dword /*addr*/) {
+HandleNode *moduleCommonW(dword /*addr*/) {
    dword lpModName = pop(SIZE_DWORD);
    char *modName = getStringW(lpModName);
    modName = checkModuleExtension(modName);
-   HandleList *m = findModuleByName(modName);
+   HandleNode *m = findModuleByName(modName);
    if (m) {
       free(modName);
    }
@@ -2730,9 +3719,9 @@ HandleList *moduleCommonW(dword /*addr*/) {
    return m;
 }
 
-HandleList *moduleCommon(char **modName) {
+HandleNode *moduleCommon(char **modName) {
    *modName = checkModuleExtension(*modName);
-   HandleList *m = findModuleByName(*modName);
+   HandleNode *m = findModuleByName(*modName);
    if (m == NULL) {
       m = addModule(*modName, false, 0);
    }
@@ -2763,7 +3752,7 @@ void emu_GetModuleHandleA(dword addr) {
       }
    }
    else {
-      HandleList *m = moduleCommonA(addr);
+      HandleNode *m = moduleCommonA(addr);
       eax = m->handle;
       if (doLogLib) {
          msg("call: GetModuleHandleA(\"%s\") = 0x%x\n", m->moduleName, eax); 
@@ -2783,7 +3772,7 @@ void emu_GetModuleHandleW(dword addr) {
       }
    }
    else {
-      HandleList *m = moduleCommonW(addr);
+      HandleNode *m = moduleCommonW(addr);
       eax = m->handle;
       if (doLogLib) {
          msg("call: GetModuleHandleW(\"%s\") = 0x%x\n", m->moduleName, eax); 
@@ -2806,7 +3795,7 @@ void emu_LdrLoadDll(dword /*addr*/) {
    }
    modName[len] = 0;
 
-   HandleList *m = moduleCommon(&modName);
+   HandleNode *m = moduleCommon(&modName);
    patch_long(pModuleHandle, m->handle);
    eax = 0;
    if (doLogLib) {
@@ -2833,7 +3822,7 @@ void emu_LdrGetProcedureAddress(dword /*addr*/) {
    else {
       func = myGetProcAddress(hModule, Ordinal);
    }
-   HandleList *m = findModuleByHandle(hModule);
+   HandleNode *m = findModuleByHandle(hModule);
    procName = reverseLookupExport(func);
 #ifdef DEBUG
    msg("x86emu: LdrGetProcedureAddress called: %s", procName);
@@ -2871,27 +3860,65 @@ void emu_LdrGetProcedureAddress(dword /*addr*/) {
    patch_long(pFunctionAddress, func);
 }
 
-//HMODULE __stdcall LoadLibraryA(LPCSTR lpLibFileName)
-void emu_LoadLibraryA(dword addr) {
-#ifdef DEBUG
-   msg("x86emu: LoadLibrary");
-#endif
-   HandleList *m = moduleCommonA(addr);
-   eax = m->handle;
+//HMODULE __stdcall emu_FreeLibrary(HANDLE hModule)
+void emu_FreeLibrary(dword /*addr*/) {
+   dword handle = pop(SIZE_DWORD); 
+   eax = 1;
    if (doLogLib) {
-      msg("call: LoadLibraryA(\"%s\") = 0x%x\n", m->moduleName , eax); 
+      msg("call: FreeLibrary(0x%x) = 0x%x\n", handle, eax); 
    }
 }
 
-//HMODULE __stdcall LoadLibraryW(LPCSTR lpLibFileName)
+//HMODULE __stdcall LoadLibraryA(LPCSTR lpLibFileName)
+void emu_LoadLibraryA(dword addr) {
+#ifdef DEBUG
+   msg("x86emu: LoadLibraryA");
+#endif
+   HandleNode *m = moduleCommonA(addr);
+   eax = m->handle;
+   if (doLogLib) {
+      msg("call: LoadLibraryA(\"%s\") = 0x%x\n", m->moduleName, eax); 
+   }
+}
+
+//HMODULE __stdcall LoadLibraryW(LPWSTR lpLibFileName)
 void emu_LoadLibraryW(dword addr) {
 #ifdef DEBUG
-   msg("x86emu: LoadLibrary");
+   msg("x86emu: LoadLibraryW");
 #endif
-   HandleList *m = moduleCommonW(addr);
+   HandleNode *m = moduleCommonW(addr);
    eax = m->handle;
    if (doLogLib) {
       msg("call: LoadLibraryW(\"%s\") = 0x%x\n", m->moduleName, eax); 
+   }
+}
+
+//HMODULE __stdcall LoadLibraryExA(LPCSTR lpLibFileName)
+//*** need to honor dwFlags
+void emu_LoadLibraryExA(dword addr) {
+#ifdef DEBUG
+   msg("x86emu: LoadLibraryExA");
+#endif
+   HandleNode *m = moduleCommonA(addr);
+   dword handle = pop(SIZE_DWORD); 
+   dword dwFlags = pop(SIZE_DWORD); 
+   eax = m->handle;
+   if (doLogLib) {
+      msg("call: LoadLibraryExA(\"%s\", 0x%x, 0x%x) = 0x%x\n", m->moduleName, handle, dwFlags, eax); 
+   }
+}
+
+//HMODULE __stdcall LoadLibraryExW(LPWSTR lpLibFileName)
+void emu_LoadLibraryExW(dword addr) {
+#ifdef DEBUG
+   msg("x86emu: LoadLibraryExW");
+#endif
+   HandleNode *m = moduleCommonW(addr);
+   dword handle = pop(SIZE_DWORD); 
+   dword dwFlags = pop(SIZE_DWORD); 
+   eax = m->handle;
+   if (doLogLib) {
+      msg("call: LoadLibraryExW(\"%s\", 0x%x, 0x%x) = 0x%x\n", m->moduleName, handle, dwFlags, eax); 
    }
 }
 
@@ -2935,7 +3962,7 @@ void emu_free(dword /*addr*/) {
 
 void doImports(PETables &pe) {
    for (thunk_rec *tr = pe.imports; tr; tr = tr->next) {
-      HandleList *m = addModule(tr->dll_name, false, 0);
+      HandleNode *m = addModule(tr->dll_name, false, 0);
 
       dword slot = tr->iat_base + pe.base;
 //      msg("processing %s imports slot = %x\n", tr->dll_name, slot);
@@ -2964,8 +3991,8 @@ void doImports(PETables &pe) {
 }
 
 //okay to call for ELF, but module list should be empty
-HandleList *moduleFromAddress(dword addr) {
-   HandleList *hl, *result = NULL;
+HandleNode *moduleFromAddress(dword addr) {
+   HandleNode *hl, *result = NULL;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (addr < hl->maxAddr && addr >= hl->handle) {
          result = hl;
@@ -2995,7 +4022,7 @@ int reverseLookupOrd(dword EOT, word ord, dword max) {
 
 //need to add fake_list check for lookups that have been faked
 char *reverseLookupExport(dword addr) {
-   HandleList *hl;
+   HandleNode *hl;
    char *fname = NULL;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (addr < hl->maxAddr && addr >= hl->handle) break;
@@ -3010,83 +4037,141 @@ char *reverseLookupExport(dword addr) {
       else {
          int idx = reverseLookupFunc(hl->eat, addr, hl->NoF, hl->handle);
          if (idx != -1) {
-            idx = reverseLookupOrd(hl->eot, idx, hl->NoN);
-            if (idx != -1) {
-               fname = getString(get_long(hl->ent + idx * 4) + hl->handle);
+            int ord = reverseLookupOrd(hl->eot, idx, hl->NoN);
+            if (ord != -1) {
+               fname = getString(get_long(hl->ent + ord * 4) + hl->handle);
    //            msg("x86emu: reverseLookupExport: %X == %s\n", addr, fname);
+            }
+            else {
+               int len = strlen(hl->moduleName) + 16;
+               fname = (char*) malloc(len);
+               ::qsnprintf(fname, len, "%s_0x%4.4X", hl->moduleName, idx + hl->ordinal_base);
+               char *dot = strchr(fname, '.');
+               if (dot) *dot = '_';
             }
          }
       }
+   }
+   else {
+      msg("reverseLookupExport failed to locate module containing address 0x%x\n", addr);
    }
    return fname;
 }
 
 FunctionInfo *newFunctionInfo(const char *name) {
-   FunctionInfo *f = (FunctionInfo*)calloc(1, sizeof(FunctionInfo));
-   int len = strlen(name) + 1;
-   f->fname = (char*)malloc(len);
-   ::qstrncpy(f->fname, name, len);
+   FunctionInfo *f = new FunctionInfo;
+   f->fname = ::qstrdup(name);
+   f->result = 0;
+   f->stackItems = 0;
+   f->callingConvention = 0;
+#if IDA_SDK_VERSION < 650
+   f->type = NULL;
+   f->fields = NULL;
+#endif
    f->next = functionInfoList;
    functionInfoList = f;
    return f;
 }   
 
-void clearFunctionInfoList() {
+void clearFunctionInfoList(void) {
    FunctionInfo *f;
    while (functionInfoList) {
       f = functionInfoList;
       functionInfoList = functionInfoList->next;
-      free(f->fname);
-      free(f);
+      ::qfree(f->fname);
+      delete f;
    }
    functionInfoList = NULL;
 }
 
+#if IDA_SDK_VERSION >= 650
+
 void getIdaTypeInfo(FunctionInfo *f) {
+   cm_t cc;
+   const type_t *type;
+   const p_list *fields;
+   f->stackItems = 8;
+   if (get_named_type(ti, f->fname, NTF_SYMU, &type, &fields) > 0) {
+      f->ftype.deserialize(ti, &type, &fields);
+//      f->ftype.get_named_type(ti, f->fname);
+      if (f->ftype.is_func()) {
+         f->stackItems = f->ftype.get_nargs();
+         cc = f->ftype.get_cc();
+         if (f->stackItems == 0xffffffffu) {
+            //just in case there was an error
+            f->stackItems = 8;
+         }
+         if (cc == CM_CC_STDCALL || cc == CM_CC_FASTCALL) {
+            f->callingConvention = CALL_STDCALL;
+         }
+         else {  //if (cc == CM_CC_CDECL || cc == CM_CC_VOIDARG) {
+            f->callingConvention = CALL_CDECL;
+         }
+      }
+   }
+}
+
+char *getFunctionPrototype(FunctionInfo *f) {
+   char *result = NULL;
+   char buf[512];
+   buf[0] = 0;
+   if (f && f->ftype.is_func()) {
+      //parse tinf to create prototype
+      result = _strdup(buf);
+      int len = strlen(result) + 3 + strlen(f->fname);
+      result = (char*)realloc(result, len);
+      qstrncat(result, " ", len);
+      qstrncat(result, f->fname, len);
+      qstrncat(result, "(", len);
+
+      for (unsigned int i = 0; i < f->stackItems; i++) {
+         //change to incorporate what we know from Ida
+         qstring type_str;
+         tinfo_t arginf = f->ftype.get_nth_arg(i);
+         arginf.print(&type_str);
+         ::qstrncpy(buf, type_str.c_str(), sizeof(buf));
+         len = strlen(result) + 3 + strlen(buf);
+         result = (char*)realloc(result, len);
+         if (i) {
+            qstrncat(result, ",", len);
+         }
+         qstrncat(result, buf, len);
+      }
+      len = strlen(result) + 2;
+      result = (char*)realloc(result, len);
+      qstrncat(result, ")", len);
+   }
+   return result;
+}
+
+char *getFunctionReturnType(FunctionInfo *f) {
+   if (f && f->ftype.is_func()) {
+      tinfo_t retinf = f->ftype.get_rettype();
+      if (get_base_type(retinf.get_decltype()) != BT_UNK) {
+         qstring type_str;
+         retinf.print(&type_str);
+         return _strdup(type_str.c_str());
+      }
+   }
+   return NULL;
+}
+
+#elif IDA_SDK_VERSION >= 520
+
+void getIdaTypeInfo(FunctionInfo *f) {
+   cm_t cc;
    const type_t *type;
    const p_list *fields;
    if (get_named_type(ti, f->fname, NTF_SYMU, &type, &fields) > 0) {
       f->type = type;
       f->fields = fields;
-#if IDA_SDK_VERSION >= 520  
       func_type_info_t info;
       f->stackItems = calc_func_nargs(ti, type);
-#else
-      ulong arglocs[20];
-      type_t *types[20];
-      char *names[20];
-      f->stackItems = build_funcarg_arrays(type,
-                            fields,
-                            arglocs,        // pointer to array of parameter locations
-                            types,        // pointer to array of parameter types
-                            names,          // pointer to array of parameter names
-                            20,           // size of these arrays
-                            true);// remove constness from 
-/*                            
-      for (int i = 0; i < f->stackItems; i++) {
-         char buf[256];
-         print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
-         msg("%d: %s %s\n", i, buf, names[i] ? names[i] : "");
-      }
-*/
-      if (f->stackItems >= 1) {
-         free_funcarg_arrays(types, names, f->stackItems);   
-      }
-#endif
+      cc = get_cc(type[1]);
       if (f->stackItems == 0xffffffffu) {
          //just in case there was an error
          f->stackItems = 0;
       }
-/*
-         type_t rettype[512];
-         
-         type_t *ret = extract_func_ret_type(t, rettype, sizeof(rettype));
-         if (ret) {
-            print_type_to_one_line(buf, sizeof(buf), NULL, rettype);
-            msg("returns: %s\n", buf);
-         }
-*/
-      cm_t cc = get_cc(type[1]);
       if (cc == CM_CC_STDCALL || cc == CM_CC_FASTCALL) {
          f->callingConvention = CALL_STDCALL;
       }
@@ -3098,26 +4183,15 @@ void getIdaTypeInfo(FunctionInfo *f) {
 
 char *getFunctionPrototype(FunctionInfo *f) {
    char *result = NULL;
+   char buf[512];
+   buf[0] = 0;
    if (f && f->type) {
-      char buf[512];
-      buf[0] = 0;
-#if IDA_SDK_VERSION >= 520
       func_type_info_t info;
       int ret = build_funcarg_info(ti, f->type, f->fields,
                          &info, BFI_NOCONST);
       if (ret >= 0) {
          print_type_to_one_line(buf, sizeof(buf), ti, info.rettype.c_str());
       }
-#else
-      ulong arglocs[20];
-      type_t *types[20];
-      char *names[20];
-      type_t rettype[512];   
-      type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
-      if (ret) {
-         print_type_to_one_line(buf, sizeof(buf), ti, rettype);
-      }
-#endif
       result = _strdup(buf);
       int len = strlen(result) + 3 + strlen(f->fname);
       result = (char*)realloc(result, len);
@@ -3125,19 +4199,9 @@ char *getFunctionPrototype(FunctionInfo *f) {
       qstrncat(result, f->fname, len);
       qstrncat(result, "(", len);
 
-      if (f->stackItems) {
-#if IDA_SDK_VERSION < 520  
-         build_funcarg_arrays(f->type, f->fields, arglocs,
-                              types, names, 20, true);
-#endif
-      }
       for (unsigned int i = 0; i < f->stackItems; i++) {
          //change to incorporate what we know from Ida
-#if IDA_SDK_VERSION >= 520  
          print_type_to_one_line(buf, sizeof(buf), NULL, info[i].type.c_str());
-#else
-         print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
-#endif
          len = strlen(result) + 3 + strlen(buf);
          result = (char*)realloc(result, len);
          if (i) {
@@ -3148,19 +4212,13 @@ char *getFunctionPrototype(FunctionInfo *f) {
       len = strlen(result) + 2;
       result = (char*)realloc(result, len);
       qstrncat(result, ")", len);
-#if IDA_SDK_VERSION < 520
-      if (f->stackItems) {
-         free_funcarg_arrays(types, names, f->stackItems);   
-      }
-#endif
    }
    return result;
 }
 
 char *getFunctionReturnType(FunctionInfo *f) {
+   char buf[512];
    if (f && f->type) {
-      char buf[512];
-#if IDA_SDK_VERSION >= 520
       func_type_info_t info;
       int ret = build_funcarg_info(ti, f->type, f->fields,
                          &info, BFI_NOCONST);
@@ -3168,17 +4226,104 @@ char *getFunctionReturnType(FunctionInfo *f) {
          print_type_to_one_line(buf, sizeof(buf), ti, info.rettype.c_str());
          return _strdup(buf);
       }
-#else
+   }
+   return NULL;
+}
+
+#else 
+
+void getIdaTypeInfo(FunctionInfo *f) {
+   cm_t cc;
+   const type_t *type;
+   const p_list *fields;
+   if (get_named_type(ti, f->fname, NTF_SYMU, &type, &fields) > 0) {
+      f->type = type;
+      f->fields = fields;
+      ulong arglocs[20];
+      type_t *types[20];
+      char *names[20];
+      f->stackItems = build_funcarg_arrays(type,
+                            fields,
+                            arglocs,        // pointer to array of parameter locations
+                            types,        // pointer to array of parameter types
+                            names,          // pointer to array of parameter names
+                            20,           // size of these arrays
+                            true);// remove constness from 
+      if (f->stackItems >= 1) {
+         free_funcarg_arrays(types, names, f->stackItems);   
+      }
+      cc = get_cc(type[1]);
+      if (f->stackItems == 0xffffffffu) {
+         //just in case there was an error
+         f->stackItems = 0;
+      }
+      if (cc == CM_CC_STDCALL || cc == CM_CC_FASTCALL) {
+         f->callingConvention = CALL_STDCALL;
+      }
+      else {  //if (cc == CM_CC_CDECL || cc == CM_CC_VOIDARG) {
+         f->callingConvention = CALL_CDECL;
+      }
+   }
+}
+
+char *getFunctionPrototype(FunctionInfo *f) {
+   char *result = NULL;
+   char buf[512];
+   buf[0] = 0;
+   if (f && f->type) {
+      ulong arglocs[20];
+      type_t *types[20];
+      char *names[20];
+      type_t rettype[512];   
+      type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
+      if (ret) {
+         print_type_to_one_line(buf, sizeof(buf), ti, rettype);
+      }
+      result = _strdup(buf);
+      int len = strlen(result) + 3 + strlen(f->fname);
+      result = (char*)realloc(result, len);
+      qstrncat(result, " ", len);
+      qstrncat(result, f->fname, len);
+      qstrncat(result, "(", len);
+
+      if (f->stackItems) {
+         build_funcarg_arrays(f->type, f->fields, arglocs,
+                              types, names, 20, true);
+      }
+      for (unsigned int i = 0; i < f->stackItems; i++) {
+         //change to incorporate what we know from Ida
+         print_type_to_one_line(buf, sizeof(buf), NULL, types[i]);
+         len = strlen(result) + 3 + strlen(buf);
+         result = (char*)realloc(result, len);
+         if (i) {
+            qstrncat(result, ",", len);
+         }
+         qstrncat(result, buf, len);
+      }
+      len = strlen(result) + 2;
+      result = (char*)realloc(result, len);
+      qstrncat(result, ")", len);
+      if (f->stackItems) {
+         free_funcarg_arrays(types, names, f->stackItems);   
+      }
+   }
+   return result;
+}
+
+char *getFunctionReturnType(FunctionInfo *f) {
+   char buf[512];
+   if (f && f->type) {
       type_t rettype[512];   
       type_t *ret = extract_func_ret_type(f->type, rettype, sizeof(rettype));
       if (ret) {
          print_type_to_one_line(buf, sizeof(buf), ti, rettype);
          return _strdup(buf);
       }
-#endif
    }
    return NULL;
 }
+
+#endif
 
 FunctionInfo *getFunctionInfo(const char *name) {
    FunctionInfo *f;
@@ -3188,9 +4333,7 @@ FunctionInfo *getFunctionInfo(const char *name) {
    if (f == NULL) {
       const type_t *type;
       const p_list *fields;
-//      msg("calling get_named_type for %s\n", name);
       if (get_named_type(ti, name, NTF_SYMU, &type, &fields) > 0) {
-//         msg("get_named_type returned non-zero for %s\n", name);
          f = newFunctionInfo(name);
          getIdaTypeInfo(f);
       }
@@ -3232,13 +4375,18 @@ void loadFunctionInfo(Buffer &b) {
    clearFunctionInfoList();
    b.read(&count, sizeof(count));
    for (; count; count--) {
-      f = (FunctionInfo*)calloc(1, sizeof(FunctionInfo));
+      f = new FunctionInfo;
+//      f = (FunctionInfo*)calloc(1, sizeof(FunctionInfo));
       b.read(&len, sizeof(len));
-      f->fname = (char*)malloc(len);
+      f->fname = (char*)::qalloc(len);
       b.read(f->fname, len);
       b.read(&f->result, sizeof(f->result));
       b.read(&f->stackItems, sizeof(f->stackItems));
       b.read(&f->callingConvention, sizeof(f->callingConvention));
+#if IDA_SDK_VERSION < 650
+      f->type = NULL;
+      f->fields = NULL;
+#endif   
       f->next = functionInfoList;
       getIdaTypeInfo(f);
       functionInfoList = f;
@@ -3278,7 +4426,7 @@ dword emu_close(dword /*fd*/) {
    return 0;
 }
 
-dword linux_mmap(dword addr, dword len, dword prot, dword flags, dword fd, dword offset) {
+dword linux_mmap(dword addr, dword len, dword prot, dword flags, dword /*fd*/, dword /*offset*/) {
    dword base = addr & 0xFFFFF000;
    if (base) {
       dword end = (base + len + 0xFFF) & 0xFFFFF000;

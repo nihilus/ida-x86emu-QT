@@ -379,6 +379,7 @@ int saveState(netnode &f) {
       if (HeapBase::getHeap()) {
          Buffer hb;
          netnode hn("$ X86emu Heap");
+         hn.create("$ X86emu Heap");
          HeapBase::getHeap()->save(hb);
    
          if (!hb.has_error()) {
@@ -394,6 +395,9 @@ int saveState(netnode &f) {
          //   msg("x86emu: writing blob of size %d.\n", sz);
             hbuf = hb.get_buf();
             hn.setblob(hbuf, hsz, 0, 'B');
+         }
+         else {
+            msg("X86 emu heap buffer error, unable to write heap data\n");
          }
       }
 //   }
@@ -493,6 +497,7 @@ int loadState(netnode &f) {
    }
    else {
 */
+/*
       unsigned char *hbuf = NULL;
       size_t hsz;
       netnode hn("$ X86emu Heap");
@@ -502,9 +507,10 @@ int loadState(netnode &f) {
          EmuHeap::loadHeapLayout(hb);
       }
       else {
-//         msg("x86emu: netnode found, sz = %d.\n", sz);
+         msg("x86emu: no heap data found in netnodes\n");
 //         return X86EMULOAD_NO_NETNODE;
       }
+*/
 //   }
 
    loadHookList(b);
@@ -2508,10 +2514,17 @@ int doThirteen() {
                      long double sti = fpuGet(lower & 7);
                      fpuSet(0, sti);
                      fpuSet(lower & 7, st0);
-                     fpuSetPointers(0, 0xD9 | dest.modrm);
+                     fpuSetPointers(0, 0xD900 | dest.modrm);
+                  }
+                  else { //FLD
+                     //*** need implementaiton 
+                     fpuSetPointers(0, 0xD900 | dest.modrm);
                   }
                   break;
                case 0xD0:  //D0 is fnop, D1-DF are undefined
+                  if (lower == 0) {  //FNOP
+                     fpuSetPointers(0, 0xD900 | dest.modrm);
+                  }
                   break;
                case 0xE0:
                   switch (lower) {
@@ -2709,6 +2722,24 @@ int doThirteen() {
             }
          }
          else {  //modrm >= 0xC0
+            int upper = dest.modrm & 0xF0;
+            int lower = dest.modrm & 0x0F;
+            switch (upper) {
+               case 0xC0: //FCMOVB/FCMOVE
+                  //*** need implementation
+                  fpuSetPointers(source.addr, 0xDA00 | dest.modrm);
+                  break;                  
+               case 0xD0: //FCMOVBE/FCMOVU
+                  //*** need implementation
+                  fpuSetPointers(source.addr, 0xDA00 | dest.modrm);
+                  break;                  
+               case 0xE0:
+                  if (lower == 9) { //FUCOMPP
+                     //*** need implementation
+                     fpuSetPointers(source.addr, 0xDA00 | dest.modrm);
+                  }
+                  break;                  
+            }
          }
          break;
       case 0xB: //
@@ -2722,7 +2753,13 @@ int doThirteen() {
                   }
                   fpuSetPointers(source.addr, 0xDB00 | dest.modrm);
                   break;
-               case 1:    //should not happen
+               case 1:    //FISTTP
+                  //source.addr is int*
+                  *i32 = (int)fpuPop();
+                  if (FPU_MASK_GET(FPU_INVALID) || !FPU_GET(FPU_STACKFAULT)) {
+                     writeMem(source.addr, i32[0], SIZE_DWORD);
+                  }
+                  fpuSetPointers(source.addr, 0xDB00 | dest.modrm);
                   break;
                case 2:    //FIST
                   //source.addr is int*
@@ -2767,20 +2804,29 @@ int doThirteen() {
             int lower = dest.modrm & 0x0F;
             switch (upper) {
                case 0xC0:
+                  //FCMOVNB/FCMOVNE
+                  //*** need implementation
+                  fpuSetPointers(0, 0xDB00 | dest.modrm);
                   break;
-               case 0xD0:  //D0 is fnop, D1-DF are undefined
+               case 0xD0:  //FCMOVNBE/FCMOVNU
+                  //*** need implementation
+                  fpuSetPointers(0, 0xDB00 | dest.modrm);
                   break;
                case 0xE0:
-                  switch (lower) {
-                     case 0x2:   //FNCLEX
-                        fpu.status &= 0x7F00;
-                        break;
-                     case 0x3:   //FNINIT
-                        fpuInit();
-                        break;
+                  if (lower == 2) { //FNCLEX
+                     fpu.status &= 0x7F00;
+                  }
+                  else if (lower == 3) { //FNINIT
+                     fpuInit();
+                  }
+                  else if (lower >= 8) { //FUCOMI
+                     //*** need implementation
+                     fpuSetPointers(0, 0xDB00 | dest.modrm);
                   }
                   break;
-               case 0xF0:
+               case 0xF0:  //FCOMI
+                  //*** need implementation
+                  fpuSetPointers(0, 0xDB00 | dest.modrm);
                   break;
             }
          }
@@ -2914,7 +2960,13 @@ int doThirteen() {
                   }
                   fpuSetPointers(source.addr, 0xDD00 | dest.modrm);
                   break;
-               case 1:    //should not happen
+               case 1:    //FISTTP
+                  *i64 = (quad)fpuPop();
+                  if (FPU_MASK_GET(FPU_INVALID) || !FPU_GET(FPU_STACKFAULT)) {
+                     writeMem(source.addr, i32[0], SIZE_DWORD);
+                     writeMem(source.addr + 4, i32[1], SIZE_DWORD);
+                  }
+                  fpuSetPointers(source.addr, 0xDD00 | dest.modrm);
                   break;
                case 2:    //FST
                   //source.addr is double*
@@ -2971,6 +3023,17 @@ int doThirteen() {
                      fpuSetTag(lower, FPU_EMPTY_TAG);
                      fpuSetPointers(0, 0xDDC0 + lower);
                   }
+                  break;
+               case 0xD0:      //FST
+                  //*** need implementation
+                  fpuSetPointers(0, 0xDD00 | dest.modrm);
+                  break;
+               case 0xE0:      //FUCOM
+                  //*** need implementation
+                  fpuSetPointers(0, 0xDE00 | dest.modrm);
+                  break;
+               case 0xF0:
+                  //should not happen
                   break;
             }
          }
@@ -3108,7 +3171,13 @@ int doThirteen() {
                   fpuPush(*i16);
                   fpuSetPointers(source.addr, 0xDF00 | dest.modrm);
                   break;
-               case 1:    //should not happen
+               case 1:    //FISTTP
+                  //source.addr is short*
+                  *i16 = (short)fpuPop();
+                  if (FPU_MASK_GET(FPU_INVALID) || !FPU_GET(FPU_STACKFAULT)) {
+                     writeMem(source.addr, i32[0], SIZE_WORD);
+                  }
+                  fpuSetPointers(source.addr, 0xDF00 | dest.modrm);
                   break;
                case 2:    //FIST
                   //source.addr is short*
@@ -3139,6 +3208,8 @@ int doThirteen() {
                   break;
                case 6:    //FBSTP
                   //source.addr is packed bcd* (10 bytes)
+                  //*** need implementation
+                  fpuSetPointers(0, 0xDF00 | dest.modrm);
                   break;
                case 7:    //FISTP
                   //source.addr is qword*
@@ -3152,9 +3223,23 @@ int doThirteen() {
             }
          }
          else {  //modrm >= 0xC0
-            switch (dest.modrm) {
+            int upper = dest.modrm & 0xF0;
+            int lower = dest.modrm & 0x0F;
+            switch (upper) {
                case 0xE0:        //FSTSW AX
-                  eax = (eax & 0xFFFF0000) | fpu.status;
+                  if (dest.modrm == 0xE0) {
+                     eax = (eax & 0xFFFF0000) | fpu.status;
+                  }
+                  else if (lower >= 8) { //FUCOMIP
+                     //*** need implementation
+                     fpuSetPointers(source.addr, 0xDF00 | dest.modrm);
+                  }
+                  break;
+               case 0xF0: //FCOMIP
+                  if (lower < 8) {
+                     //*** need implementation
+                     fpuSetPointers(source.addr, 0xDF00 | dest.modrm);
+                  }
                   break;
             }
          }

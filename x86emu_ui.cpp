@@ -1,19 +1,19 @@
 /*
    Source for x86 emulator IdaPro plugin
    Copyright (c) 2003-2010 Chris Eagle
-   
+
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
-   Software Foundation; either version 2 of the License, or (at your option) 
+   Software Foundation; either version 2 of the License, or (at your option)
    any later version.
-   
+
    This program is distributed in the hope that it will be useful, but WITHOUT
-   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
-   FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for 
+   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+   FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
    more details.
-   
-   You should have received a copy of the GNU General Public License along with 
-   this program; if not, write to the Free Software Foundation, Inc., 59 Temple 
+
+   You should have received a copy of the GNU General Public License along with
+   this program; if not, write to the Free Software Foundation, Inc., 59 Temple
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
@@ -72,11 +72,11 @@ static char initial[80]; //dynamic initial value for the input dialog
 
 //This is the original window procedure for the register edit controls
 //required in order to subclass the controls to handle double clicks
-static LONG oldProc;     
-static LONG oldSegProc;     
+static LONG oldProc;
+static LONG oldSegProc;
 
 //text names for each of the register edit controls
-const char *names[] = {"EAX", "EBX", "ECX", "EDX", "EBP", 
+const char *names[] = {"EAX", "EBX", "ECX", "EDX", "EBP",
                        "ESP", "ESI", "EDI", "EIP", "EFLAGS"};
 
 //window handles for each of the register edit controls
@@ -129,16 +129,32 @@ unsigned int *controlToRegPtr(int control) {
    return getRegisterPointer(reg);
 }
 
-//update the specified register display with the specified 
+//update the specified register display with the specified
 //value.  useful to update register contents based on user
 //input
 void updateRegisterDisplay(int r) {
+   static bool registersSet[MAX_REG + 1];
+   static unsigned int current[MAX_REG + 1];
    char buf[16];
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", getRegisterValue(r));
+   unsigned int rval = getRegisterValue(r);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", rval);
+   if (registersSet[r]) {
+      if (rval != current[r]) { //set text color to red
+         current[r] = rval;
+//         SendDlgItemMessage(x86Dlg, regToControl(r), 
+      }
+      else { //set text color to black
+//         SendDlgItemMessage(x86Dlg, regToControl(r), 
+      }
+   }
+   else {
+      registersSet[r] = true;
+      current[r] = rval;
+   }
    SetDlgItemText(x86Dlg, regToControl(r), buf);
 }
 
-//update the specified register display with the specified 
+//update the specified register display with the specified
 //value.  useful to update register contents based on user
 //input
 void updateRegisterControl(int controlID) {
@@ -211,7 +227,7 @@ char *getDirectoryName(const char *title, char *dirName, int nameSize) {
    ofn.hwndOwner = x86Dlg;
    ofn.lpstrFile = dirName;
    //
-   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not
    // use the contents of szFile to initialize itself.
    //
    *dirName = '\0';
@@ -222,7 +238,7 @@ char *getDirectoryName(const char *title, char *dirName, int nameSize) {
    ofn.nMaxFileTitle = 0;
    ofn.lpstrInitialDir = NULL;
    ofn.lpstrTitle = title;
-   ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;         
+   ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
    if (GetOpenFileName(&ofn)) {
       return dirName;
    }
@@ -241,7 +257,7 @@ char *getSaveFileName(const char *title, char *fileName, int nameSize, const cha
    ofn.hwndOwner = x86Dlg;
    ofn.lpstrFile = fileName;
    //
-   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not
    // use the contents of szFile to initialize itself.
    //
    *fileName = '\0';
@@ -252,7 +268,7 @@ char *getSaveFileName(const char *title, char *fileName, int nameSize, const cha
    ofn.nMaxFileTitle = 0;
    ofn.lpstrInitialDir = NULL;
    ofn.lpstrTitle = title;
-   ofn.Flags = OFN_OVERWRITEPROMPT;         
+   ofn.Flags = OFN_OVERWRITEPROMPT;
    if (GetSaveFileName(&ofn)) {
       return fileName;
    }
@@ -282,11 +298,11 @@ void argCallback(const char *func, const char *arg, int idx, void *user) {
    }
 }
 
-BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message, 
-                                WPARAM wParam, LPARAM lParam) { 
+BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
+                                WPARAM wParam, LPARAM lParam) {
    char buf[256];
    FunctionInfo *f;
-   switch (message) { 
+   switch (message) {
       case WM_INITDIALOG: {
          if (unemulatedName) {
             ::qsnprintf(buf, sizeof(buf), "Call to: %s", unemulatedName);
@@ -294,7 +310,7 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
          else {
             ::qsnprintf(buf, sizeof(buf), "Call to: Location 0x%08.8x", unemulatedAddr);
          }
-         
+
          SendMessage(hwndDlg, WM_SETTEXT, (WPARAM)0, (LPARAM)buf);
 
          SendDlgItemMessage(hwndDlg, IDC_PARM_LIST, WM_SETFONT, (WPARAM)fixed, FALSE);
@@ -308,8 +324,8 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
             ::qsnprintf(buf, sizeof(buf), "0x%8.8x", f->result);
             SetDlgItemText(hwndDlg, IDC_RETURN_VALUE, buf);
             SetDlgItemInt(hwndDlg, IDC_CLEAR_STACK, f->stackItems, FALSE);
-            CheckRadioButton(hwndDlg, IDC_CALL_CDECL, IDC_CALL_STDCALL, 
-               (f->callingConvention == CALL_CDECL) ? IDC_CALL_CDECL : IDC_CALL_STDCALL); 
+            CheckRadioButton(hwndDlg, IDC_CALL_CDECL, IDC_CALL_STDCALL,
+               (f->callingConvention == CALL_CDECL) ? IDC_CALL_CDECL : IDC_CALL_STDCALL);
             char *ret_type = getFunctionReturnType(f);
             if (ret_type) {
                ::qsnprintf(buf, sizeof(buf), "Return type: %s", ret_type);
@@ -319,8 +335,8 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
          }
 /*
          else {
-            CheckRadioButton(hwndDlg, IDC_CALL_CDECL, IDC_CALL_STDCALL, IDC_CALL_CDECL); 
-         }         
+            CheckRadioButton(hwndDlg, IDC_CALL_CDECL, IDC_CALL_STDCALL, IDC_CALL_CDECL);
+         }
 */
          UnemulatedCbStruct cbs;
          cbs.dlg = hwndDlg;
@@ -331,11 +347,11 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
          SendDlgItemMessage(hwndDlg, IDC_PARM_LIST, LB_SETHORIZONTALEXTENT, (WPARAM)cbs.maxLength, (LPARAM)0);
          DeleteDC(cbs.hdc);
 
-         return TRUE; 
+         return TRUE;
       }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDOK: {//OK Button 
+      case WM_COMMAND:
+         switch (LOWORD(wParam)) {
+            case IDOK: {//OK Button
                dword retval = 0;
                GetDlgItemText(hwndDlg, IDC_RETURN_VALUE, buf, sizeof(buf));
                if (strlen(buf)) {
@@ -353,7 +369,7 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
                   callType = CALL_STDCALL;
                }
                else {
-                  MessageBox(hwndDlg, "Please select a calling convention.", 
+                  MessageBox(hwndDlg, "Please select a calling convention.",
                              "Error", MB_OK | MB_ICONWARNING);
                }
                if (callType != 0xFFFFFFFF) {
@@ -364,10 +380,10 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
                   EndDialog(hwndDlg, 0);
                }
                return true;
-            } 
-         } 
-   } 
-   return FALSE; 
+            }
+         }
+   }
+   return FALSE;
 }
 
 /*
@@ -383,10 +399,10 @@ void handleUnemulatedFunction(dword addr, const char *name) {
  * Ask the user which thread they would like to switch to
  * and make the necessary changes to the cpu state.
  */
-BOOL CALLBACK SwitchThreadDlgProc(HWND hwndDlg, UINT message, 
-                                  WPARAM wParam, LPARAM lParam) { 
+BOOL CALLBACK SwitchThreadDlgProc(HWND hwndDlg, UINT message,
+                                  WPARAM wParam, LPARAM lParam) {
    char buf[64];
-   switch (message) { 
+   switch (message) {
       case WM_INITDIALOG: {
          SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, WM_SETFONT, (WPARAM)fixed, FALSE);
 
@@ -394,39 +410,39 @@ BOOL CALLBACK SwitchThreadDlgProc(HWND hwndDlg, UINT message,
             ::qsnprintf(buf, sizeof(buf), "Thread 0x%x%s", tn->handle, tn->next ? "" : " (main)");
             SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, LB_ADDSTRING, (WPARAM)0, (LPARAM)buf);
          }
-         return TRUE; 
+         return TRUE;
       }
-      case WM_COMMAND: { 
+      case WM_COMMAND: {
          int selected, idx = 0;
-         switch (LOWORD(wParam)) { 
-            case IDOK: //Switch Button 
+         switch (LOWORD(wParam)) {
+            case IDOK: //Switch Button
                selected = SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, LB_GETCURSEL, 0, 0);
                if (selected != LB_ERR) {
                   switchThread(selected);
                }
                EndDialog(hwndDlg, 0);
-               return TRUE; 
-            case ID_DESTROY: //Destroy Button 
+               return TRUE;
+            case ID_DESTROY: //Destroy Button
                selected = SendDlgItemMessage(hwndDlg, IDC_THREAD_LIST, LB_GETCURSEL, 0, 0);
                if (selected != LB_ERR) {
                   destroyThread(selected);
                }
                EndDialog(hwndDlg, 0);
-               return TRUE; 
-            case IDCANCEL: //CANCEL Button 
+               return TRUE;
+            case IDCANCEL: //CANCEL Button
                EndDialog(hwndDlg, 0);
-               return TRUE; 
-         } 
+               return TRUE;
+         }
       }
-   } 
-   return FALSE; 
+   }
+   return FALSE;
 }
 
-BOOL CALLBACK SegmentDlgProc(HWND hwndDlg, UINT message, 
-                             WPARAM wParam, LPARAM lParam) { 
+BOOL CALLBACK SegmentDlgProc(HWND hwndDlg, UINT message,
+                             WPARAM wParam, LPARAM lParam) {
    char buf[16];
    int i;
-   switch (message) { 
+   switch (message) {
       case WM_INITDIALOG: {
          for (i = IDC_CS_REG; i <= IDC_GS_BASE; i++) {
             SendDlgItemMessage(hwndDlg, i, WM_SETFONT, (WPARAM)fixed, FALSE);
@@ -438,11 +454,11 @@ BOOL CALLBACK SegmentDlgProc(HWND hwndDlg, UINT message,
             }
             SetDlgItemText(hwndDlg, i, buf);
          }
-         return TRUE; 
+         return TRUE;
       }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDOK: //OK Button 
+      case WM_COMMAND:
+         switch (LOWORD(wParam)) {
+            case IDOK: //OK Button
                for (i = IDC_CS_REG; i <= IDC_GS_BASE; i++) {
 //                  dword newVal;
                   GetDlgItemText(hwndDlg, i, buf, 16);
@@ -456,18 +472,18 @@ BOOL CALLBACK SegmentDlgProc(HWND hwndDlg, UINT message,
                   }
                }
                EndDialog(hwndDlg, 0);
-               return TRUE; 
-            case IDCANCEL: //CANCEL Button 
+               return TRUE;
+            case IDCANCEL: //CANCEL Button
                EndDialog(hwndDlg, 0);
-               return TRUE; 
-         } 
-   } 
-   return FALSE; 
-} 
+               return TRUE;
+         }
+   }
+   return FALSE;
+}
 
-BOOL CALLBACK MemoryDlgProc(HWND hwndDlg, UINT message, 
-                            WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
+BOOL CALLBACK MemoryDlgProc(HWND hwndDlg, UINT message,
+                            WPARAM wParam, LPARAM lParam) {
+   switch (message) {
       case WM_INITDIALOG: {
          char buf[16];
          for (int i = IDC_STACKTOP; i <= IDC_HEAPSIZE; i++) {
@@ -484,13 +500,13 @@ BOOL CALLBACK MemoryDlgProc(HWND hwndDlg, UINT message,
          SetDlgItemText(hwndDlg, IDC_HEAPBASE, buf);
          ::qsnprintf(buf, sizeof(buf), "0x%08X", h->endEA - h->startEA);
          SetDlgItemText(hwndDlg, IDC_HEAPSIZE, buf);
-         return TRUE; 
+         return TRUE;
       }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-         case IDOK: {//OK Button 
+      case WM_COMMAND:
+         switch (LOWORD(wParam)) {
+         case IDOK: {//OK Button
 /*
-               mgr->initStack(getEditBoxInt(hwndDlg, IDC_STACKTOP), 
+               mgr->initStack(getEditBoxInt(hwndDlg, IDC_STACKTOP),
                               getEditBoxInt(hwndDlg, IDC_STACKSIZE));
                esp = mgr->stack->getStackTop();
                unsigned int heapSize = getEditBoxInt(hwndDlg, IDC_HEAPSIZE);
@@ -502,14 +518,14 @@ BOOL CALLBACK MemoryDlgProc(HWND hwndDlg, UINT message,
                syncDisplay();
 */
                EndDialog(hwndDlg, 0);
-               return TRUE; 
+               return TRUE;
             }
-         case IDCANCEL: //Cancel Button 
+         case IDCANCEL: //Cancel Button
             EndDialog(hwndDlg, 0);
-            return TRUE; 
-         } 
-   } 
-   return FALSE; 
+            return TRUE;
+         }
+   }
+   return FALSE;
 }
 
 //ask user for an file name and load the file into memory
@@ -526,7 +542,7 @@ char *getOpenFileName(const char *title, char *fileName, int nameLen, const char
    ofn.hwndOwner = x86Dlg;
    ofn.lpstrFile = fileName;
    //
-   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not 
+   // Set lpstrFile[0] to '\0' so that GetOpenFileName does not
    // use the contents of szFile to initialize itself.
    //
 //   *fileName = '\0';
@@ -537,16 +553,16 @@ char *getOpenFileName(const char *title, char *fileName, int nameLen, const char
    ofn.nMaxFileTitle = 0;
    ofn.lpstrInitialDir = initDir;
    ofn.lpstrTitle = title;
-   ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;         
+   ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
    if (GetOpenFileName(&ofn)) {
       return fileName;
    }
    return NULL;
 }
 
-BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message, 
-                               WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
+BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message,
+                               WPARAM wParam, LPARAM lParam) {
+   switch (message) {
       case WM_INITDIALOG: {
          char buf[32];
          ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)get_screen_ea());
@@ -554,12 +570,12 @@ BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message,
          SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_SETFONT, (WPARAM)fixed, FALSE);
          SetDlgItemText(hwndDlg, IDC_MEM_ADDR, buf);
          SetDlgItemText(hwndDlg, IDC_MEM_VALUES, "");
-         CheckRadioButton(hwndDlg, IDC_HEX_BYTES, IDC_MEM_LOADFILE, IDC_HEX_DWORDS); 
-         return TRUE; 
+         CheckRadioButton(hwndDlg, IDC_HEX_BYTES, IDC_MEM_LOADFILE, IDC_HEX_DWORDS);
+         return TRUE;
       }
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-         case IDOK: {//OK Button 
+      case WM_COMMAND:
+         switch (LOWORD(wParam)) {
+         case IDOK: {//OK Button
                dword btn;
                dword addr = getEditBoxInt(hwndDlg, IDC_MEM_ADDR);
                dword len = SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_GETTEXTLENGTH, (WPARAM)0, (LPARAM)0);
@@ -597,14 +613,14 @@ BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message,
                }
                free(vals);
                EndDialog(hwndDlg, 0);
-               return TRUE; 
+               return TRUE;
             }
-         case IDCANCEL: //Cancel Button 
+         case IDCANCEL: //Cancel Button
             EndDialog(hwndDlg, 0);
-            return TRUE; 
-         } 
-   } 
-   return FALSE; 
+            return TRUE;
+         }
+   }
+   return FALSE;
 }
 
 void showInformationMessage(const char *title, const char *msg) {
@@ -645,13 +661,13 @@ void restoreCursor() {
 }
 
 //This is the main callback function for the emulator interface
-BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message, 
-                      WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
+BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
+                      WPARAM wParam, LPARAM lParam) {
+   switch (message) {
       case WM_INITDIALOG: {
          x86Dlg = hwndDlg;
          setTitle();
-         waitCursor = LoadCursor(NULL, IDC_WAIT); 
+         waitCursor = LoadCursor(NULL, IDC_WAIT);
          for (int i = IDC_EAX; i <= IDC_EFLAGS; i++) {
             HWND ctl = GetDlgItem(hwndDlg, i);
             editBoxes[i - IDC_EAX] = ctl;
@@ -660,7 +676,7 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
          }
          SendDlgItemMessage(hwndDlg, IDC_MEMORY, WM_SETFONT, (WPARAM)fixed, FALSE);
          syncDisplay();
-         return TRUE; 
+         return TRUE;
       }
       case WM_CHAR:
          if (wParam == VK_CANCEL) {
@@ -670,16 +686,16 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
       case WM_COMMAND: {
          char loc[32];
          ThreadNode *currThread = activeThread;
-         switch (LOWORD(wParam)) { 
+         switch (LOWORD(wParam)) {
             case IDC_HEAP_LIST:
                dumpHeap();
                break;
             case IDC_RESET: //reset the display/emulator
                doReset();
                return TRUE;
-            case IDC_STEP: //STEP 
+            case IDC_STEP: //STEP
                stepOne();
-               return TRUE; 
+               return TRUE;
             case IDC_JUMP_CURSOR: //Reset eip.cursor
                jumpToCursor();
                return TRUE;
@@ -692,11 +708,11 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
                return TRUE;
             case IDC_RUN_TO_CURSOR: {//Run to cursor
                runToCursor();
-               return TRUE; 
+               return TRUE;
             }
-            case IDC_HIDE: 
-               ShowWindow(hwndDlg, SW_HIDE);    
-               return TRUE; 
+            case IDC_HIDE:
+               ShowWindow(hwndDlg, SW_HIDE);
+               return TRUE;
             case IDC_MEMORY:
                if (HIWORD(wParam) == LBN_DBLCLK) {
                   //modify stack contents in here
@@ -709,17 +725,17 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
             case IDC_PUSH:
                pushData();
                return TRUE;
-            case IDC_DUMP: 
+            case IDC_DUMP:
                dumpRange();
                return TRUE;
-            case IDC_DUMP_PE: 
+            case IDC_DUMP_PE:
                dumpEmbededPE();
                return TRUE;
-            case IDC_SEGMENTS: 
+            case IDC_SEGMENTS:
                DialogBox(hModule, MAKEINTRESOURCE(IDD_SEGMENTDIALOG),
                          x86Dlg, SegmentDlgProc);
                return TRUE;
-            case IDC_SETTINGS: 
+            case IDC_SETTINGS:
                DialogBox(hModule, MAKEINTRESOURCE(IDD_MEMORY),
                          x86Dlg, MemoryDlgProc);
                return TRUE;
@@ -744,7 +760,7 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
                   CheckMenuItem(menu, IDC_TRACE, MF_BYCOMMAND | MF_CHECKED);
                   openTraceFile();
                }
-               setTracing(!getTracing()); 
+               setTracing(!getTracing());
                return TRUE;
             }            
             case IDC_LOGLIB: {
@@ -755,9 +771,12 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
                else {
                   CheckMenuItem(menu, IDC_TRACE, MF_BYCOMMAND | MF_CHECKED);
                }
-               setLogLibrary(!logLibrary()); 
+               setLogLibrary(!logLibrary());
                return TRUE;
-            }            
+            }
+            case IDC_LOADLIB: //load a library file into the database
+               loadLibrary();
+               return TRUE;
             case IDC_GPA: //set a GetProcAddress save point
                tagImportAddressSavePoint();
                return TRUE;
@@ -802,16 +821,16 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
                buildDllMainArgs();
                return TRUE;
             }
-         } 
+         }
       }
-   } 
-   return FALSE; 
-} 
+   }
+   return FALSE;
+}
 
 //subclassing procedure for the register edit controls.  only want to catch
 //double clicks here and open an edit window in response.  Otherwise, pass
 //the message along
-LRESULT EditSubclassProc(HWND hwndCtl, UINT message, 
+LRESULT EditSubclassProc(HWND hwndCtl, UINT message,
                          WPARAM wParam, LPARAM lParam) {
    switch (message) {
       case WM_LBUTTONDBLCLK:
@@ -821,60 +840,60 @@ LRESULT EditSubclassProc(HWND hwndCtl, UINT message,
    return CallWindowProc((WNDPROC) oldProc, hwndCtl, message, wParam, lParam);
 }
 
-//open an input dialog.  Use the globals, title, prompt, and initial to 
+//open an input dialog.  Use the globals, title, prompt, and initial to
 //configure the dialog box.  return the user entry in global value
-BOOL CALLBACK InputDlgProc(HWND hwndDlg, UINT message, 
-                           WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
+BOOL CALLBACK InputDlgProc(HWND hwndDlg, UINT message,
+                           WPARAM wParam, LPARAM lParam) {
+   switch (message) {
       case WM_INITDIALOG:
          SendDlgItemMessage(hwndDlg, IDC_DATA, WM_SETFONT, (WPARAM)fixed, FALSE);
          SetDlgItemText(hwndDlg, IDC_MESSAGE, prompt);
          SetDlgItemText(hwndDlg, IDC_DATA, initial);
          SendMessage(hwndDlg, WM_SETTEXT, FALSE, (LPARAM)title);
-         return TRUE; 
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
-            case IDC_DATA: //STEP 
-               return TRUE; 
+         return TRUE;
+      case WM_COMMAND:
+         switch (LOWORD(wParam)) {
+            case IDC_DATA: //STEP
+               return TRUE;
             case ID_OK: //STEP from cursor
                GetDlgItemText(hwndDlg, IDC_DATA, value, 80);
                EndDialog(hwndDlg, 2);
-               return TRUE; 
+               return TRUE;
             case ID_CANCEL: //Run
                EndDialog(hwndDlg, -1);
-               return TRUE; 
-         } 
-   } 
-   return FALSE; 
-} 
+               return TRUE;
+         }
+   }
+   return FALSE;
+}
 
 //open an mmap input dialog.
-BOOL CALLBACK MmapDlgProc(HWND hwndDlg, UINT message, 
-                           WPARAM wParam, LPARAM lParam) { 
-   switch (message) { 
+BOOL CALLBACK MmapDlgProc(HWND hwndDlg, UINT message,
+                           WPARAM wParam, LPARAM lParam) {
+   switch (message) {
       case WM_INITDIALOG:
          SendDlgItemMessage(hwndDlg, IDC_MMAP_SIZE, WM_SETFONT, (WPARAM)fixed, FALSE);
          SetDlgItemInt(hwndDlg, IDC_MMAP_BASE, 0, FALSE);
          SetDlgItemText(hwndDlg, IDC_MMAP_SIZE, "0x1000");
-         return TRUE; 
-      case WM_COMMAND: 
-         switch (LOWORD(wParam)) { 
+         return TRUE;
+      case WM_COMMAND:
+         switch (LOWORD(wParam)) {
             case IDC_MMAP_BASE:
-               return TRUE; 
+               return TRUE;
             case IDC_MMAP_SIZE:
-               return TRUE; 
+               return TRUE;
             case ID_OK:
                GetDlgItemText(hwndDlg, IDC_MMAP_BASE, mmap_base, 80);
                GetDlgItemText(hwndDlg, IDC_MMAP_SIZE, mmap_size, 80);
                EndDialog(hwndDlg, 2);
-               return TRUE; 
+               return TRUE;
             case ID_CANCEL: //Run
                EndDialog(hwndDlg, -1);
-               return TRUE; 
-         } 
-   } 
-   return FALSE; 
-} 
+               return TRUE;
+         }
+   }
+   return FALSE;
+}
 
 bool createEmulatorWindow() {
    if (hModule == NULL) {
@@ -889,7 +908,7 @@ bool createEmulatorWindow() {
 
 void destroyEmulatorWindow() {
    DestroyWindow(x86Dlg);
-   x86Dlg = NULL; 
+   x86Dlg = NULL;
 }
 
 void displayEmulatorWindow() {

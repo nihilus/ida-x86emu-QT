@@ -1,19 +1,19 @@
 /*
    Source for x86 emulator IdaPro plugin
    Copyright (c) 2003-2010 Chris Eagle
-   
+
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the Free
-   Software Foundation; either version 2 of the License, or (at your option) 
+   Software Foundation; either version 2 of the License, or (at your option)
    any later version.
-   
+
    This program is distributed in the hope that it will be useful, but WITHOUT
-   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
-   FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for 
+   ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+   FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
    more details.
-   
-   You should have received a copy of the GNU General Public License along with 
-   this program; if not, write to the Free Software Foundation, Inc., 59 Temple 
+
+   You should have received a copy of the GNU General Public License along with
+   this program; if not, write to the Free Software Foundation, Inc., 59 Temple
    Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
@@ -62,8 +62,10 @@
 #include <typeinf.hpp>
 #include <nalt.hpp>
 #include <segment.hpp>
+#include <srarea.hpp>
 #include <typeinf.hpp>
 #include <struct.hpp>
+#include <entry.hpp>
 
 #include "emufuncs.h"
 #include "emuheap.h"
@@ -76,7 +78,17 @@
 #include "memmgr.h"
 #include "buffer.h"
 
+#ifndef DEBUG
+//#define DEBUG 1
+#endif
+
 #define f_PDF 0x4444
+
+#define R_es 29
+#define R_cs 30
+#define R_ss 31
+#define R_ds 32
+#define R_fs 33
 
 void memoryAccessException();
 
@@ -162,7 +174,7 @@ dword ELFLoadHeaders(void);
 PETables pe;
 
 //pointer to start of ELF environment strings, used to build
-//envp array 
+//envp array
 static dword elfEnvStart = 0xC0000000;
 static dword elfArgStart = 0xC0000000;
 static char **mainArgs;
@@ -206,7 +218,7 @@ void getRandomBytes(void *buf, unsigned int len) {
 }
 
 /*
- * return system time as 64 bit quantity representing the number of 
+ * return system time as 64 bit quantity representing the number of
  * 100-nanosecond intervals since January 1, 1601 (UTC).
  */
 void getSystemBaseTime(dword *timeLow, dword *timeHigh) {
@@ -274,7 +286,7 @@ void closeTrace() {
       qfclose(traceFile);
       traceFile = NULL;
    }
-}   
+}
 
 void openTraceFile() {
    char buf[260];
@@ -296,7 +308,7 @@ void openTraceFile() {
  */
 void setTitle() {
    char title[80];
-   ::qsnprintf(title, sizeof(title), "x86 Emulator - thread 0x%x%s", activeThread->handle, 
+   ::qsnprintf(title, sizeof(title), "x86 Emulator - thread 0x%x%s", activeThread->handle,
            (activeThread->handle == THREAD_HANDLE_BASE) ? " (main)" : "");
    setEmulatorTitle(title);
 }
@@ -386,8 +398,9 @@ void syncDisplay() {
    //whenever stack value is changed.  If also >=520, then we have opened
    //a stack display in which we can set the cursor.
 #if IDA_SDK_VERSION >= 530
-   segment_t *s = get_segm_by_name(".stack");
-   if (s->contains(esp)) {
+//   segment_t *s = get_segm_by_name(".stack");
+   segment_t *s = getseg(esp);
+   if (s) {
       //make sure stack view exists
       if (find_tform("IDA View-Stack")) {
          idaplace_t p(esp, 0);
@@ -453,7 +466,7 @@ void codeCheck(void) {
 */
 }
 
-//update the specified register display with the specified 
+//update the specified register display with the specified
 //value.  useful to update register contents based on user
 //input
 void updateRegister(int r, dword val) {
@@ -474,7 +487,7 @@ dword parseNumber(char *numb) {
    return val;
 }
 
-//ask the user for space separated data and push it onto the 
+//ask the user for space separated data and push it onto the
 //stack in right to left order as a C function would
 void pushData() {
    int count = 0;
@@ -566,7 +579,7 @@ void dumpEmbededPE() {
    dumpRange(base, base + sectionOffset + sectionSize);
 }
 
-bool isStringPointer(char *type_str) {
+bool isStringPointer(const char *type_str) {
    bool result = false;
    int len = strlen(type_str);
    char *buf = (char*)malloc(len + 1);
@@ -591,6 +604,8 @@ bool isStringPointer(char *type_str) {
    return result;
 }
 
+#if IDA_SDK_VERSION >= 650
+
 void generateArgList(const char *func, argcallback_t cb, void *user) {
    char buf[256];
    int len = 8;
@@ -598,43 +613,107 @@ void generateArgList(const char *func, argcallback_t cb, void *user) {
    if (f) {
       len = f->stackItems;
    }
-#if IDA_SDK_VERSION >= 520
+   func_type_data_t info;
+   int haveIdaTypeInfo = f != NULL && f->ftype.is_func();
+   if (haveIdaTypeInfo) {
+      //retrieve info about function arguments
+      haveIdaTypeInfo = f->ftype.get_func_details(&info);
+   }
+   for (int i = 0; i < len; i++) {
+      dword parm = readMem(esp + i * 4, SIZE_DWORD);
+      if (haveIdaTypeInfo) {
+         //change to incorporate what we know from Ida
+         qstring type_str;
+         tinfo_t arginf = f->ftype.get_nth_arg(i);
+         arginf.print(&type_str);
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]",
+                  i, parm, type_str.c_str(), info[i].name.c_str());
+         if (isStringPointer(type_str.c_str())) {
+            //read string from database at address parm and append to buf
+            char *val = getString(parm);
+            qstrncat(buf, " '", sizeof(buf));
+            qstrncat(buf, val, sizeof(buf));
+            qstrncat(buf, "'", sizeof(buf));
+            free(val);
+         }
+      }
+      else {
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x", i, parm);
+      }
+      (*cb)(func, buf, i, user);
+   }
+}
+
+#elif IDA_SDK_VERSION >= 520
+
+void generateArgList(const char *func, argcallback_t cb, void *user) {
+   char buf[256];
+   int len = 8;
+   FunctionInfo *f = getFunctionInfo(func);
+   if (f) {
+      len = f->stackItems;
+   }
    func_type_info_t info;
-#else
-   ulong arglocs[20];
-   type_t *types[20];
-   char *names[20];
-#endif
    int haveIdaTypeInfo = f && f->type && len;
    if (haveIdaTypeInfo) {
-#if IDA_SDK_VERSION >= 520  
       build_funcarg_info(ti, f->type, f->fields,
                          &info, BFI_NOCONST);
-#else
-      build_funcarg_arrays(f->type, f->fields, arglocs,
-                           types, names, 20, true);
-#endif
    }
    for (int i = 0; i < len; i++) {
       dword parm = readMem(esp + i * 4, SIZE_DWORD);
       if (haveIdaTypeInfo) {
          //change to incorporate what we know from Ida
          char type_str[128];
-#if IDA_SDK_VERSION >= 520  
          print_type_to_one_line(type_str, sizeof(type_str), NULL, info[i].type.c_str());
-         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]", 
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]",
                   i, parm, type_str, info[i].name.c_str());
-#else
+         if (isStringPointer(type_str)) {
+            //read string from database at address parm and append to buf
+            char *val = getString(parm);
+            qstrncat(buf, " '", sizeof(buf));
+            qstrncat(buf, val, sizeof(buf));
+            qstrncat(buf, "'", sizeof(buf));
+            free(val);
+         }
+      }
+      else {
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x", i, parm);
+      }
+      (*cb)(func, buf, i, user);
+   }
+}
+
+#else 
+
+void generateArgList(const char *func, argcallback_t cb, void *user) {
+   char buf[256];
+   int len = 8;
+   FunctionInfo *f = getFunctionInfo(func);
+   if (f) {
+      len = f->stackItems;
+   }
+   ulong arglocs[20];
+   type_t *types[20];
+   char *names[20];
+   int haveIdaTypeInfo = f && f->type && len;
+   if (haveIdaTypeInfo) {
+      build_funcarg_arrays(f->type, f->fields, arglocs,
+                           types, names, 20, true);
+   }
+   for (int i = 0; i < len; i++) {
+      dword parm = readMem(esp + i * 4, SIZE_DWORD);
+      if (haveIdaTypeInfo) {
+         //change to incorporate what we know from Ida
+         char type_str[128];
          print_type_to_one_line(type_str, sizeof(type_str), NULL, types[i]);
-         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]", 
+         ::qsnprintf(buf, sizeof(buf), "arg %d: 0x%8.8x  [%s %s]",
                   i, parm, type_str, names[i] ? names[i] : "");
-#endif
          if (isStringPointer(type_str)) {
             //read string from database at address parm and append to buf
             char *val = getString(parm);
 #if IDA_SDK_VERSION < 480
             int len = strlen(buf);
-            ::qsnprintf(buf + len, sizeof(buf) - len, " '%s'", val); 
+            ::qsnprintf(buf + len, sizeof(buf) - len, " '%s'", val);
 #else
             qstrncat(buf, " '", sizeof(buf));
             qstrncat(buf, val, sizeof(buf));
@@ -648,13 +727,12 @@ void generateArgList(const char *func, argcallback_t cb, void *user) {
       }
       (*cb)(func, buf, i, user);
    }
-#if IDA_SDK_VERSION < 520
    if (haveIdaTypeInfo) {
-      free_funcarg_arrays(types, names, len);   
+      free_funcarg_arrays(types, names, len);
    }
-#endif
 }
 
+#endif
 
 /*
  * This function is used for all unemulated API functions
@@ -700,10 +778,10 @@ void destroyThread(int tidx) {
          }
          break;
       }
-   }   
+   }
 }
 
-//ask user for an file name and load the entire file into memory
+//ask user for a file name and load the entire file into memory
 //at the specified address
 void memLoadFile(dword start) {
    char szFile[260];       // buffer for file name
@@ -736,6 +814,257 @@ void memLoadFile(dword start) {
    }
 }
 
+//ask user for a file name and load the library file into memory
+//optionally transfer load address to eax
+//optionally transfer control to entry point
+bool loadLibrary() {
+   char szFile[260];       // buffer for file name
+#ifndef __QT__
+   const char *filter = "All (*.*)\0*.*\0";
+#else
+   const char *filter = "All (*.*)";
+#endif
+   szFile[0] = 0;
+   char *fileName = getOpenFileName("Choose library file", szFile, sizeof(szFile), filter);
+   if (fileName) {
+      FILE *f = qfopen(szFile, "rb");
+      if (f) {
+         IMAGE_DOS_HEADER dos;
+         IMAGE_NT_HEADERS nt;
+         IMAGE_SECTION_HEADER *sect;
+         if (qfread(f, &dos, sizeof(dos)) != sizeof(dos) || dos.e_magic != 0x5A4D ||
+             qfseek(f, dos.e_lfanew, SEEK_SET) != 0 ||
+             qfread(f, &nt, sizeof(nt)) != sizeof(nt) || nt.Signature != 0x4550 ||
+             qfseek(f, dos.e_lfanew + sizeof(dword) + sizeof(nt.FileHeader) + nt.FileHeader.SizeOfOptionalHeader, SEEK_SET) != 0) {
+            qfclose(f);
+            return false;
+         }
+         int sectSize = sizeof(IMAGE_SECTION_HEADER) * nt.FileHeader.NumberOfSections;
+         sect = (IMAGE_SECTION_HEADER*)qalloc(sectSize);
+         if (qfread(f, sect, sectSize) != sectSize) {
+            qfree(sect);
+            qfclose(f);
+            return false;
+         }
+         dword loadBase = nt.OptionalHeader.ImageBase;
+         
+         //now loop to find hole large enough to accomodate image
+         //try ImageBase first
+         bool found = false;
+         bool triedDefault = loadBase == 0x10000000;
+         do {
+            msg("Trying base address of 0x%x\n", loadBase);
+            segment_t *s = getseg(loadBase);
+            if (s == NULL) {
+#if (IDA_SDK_VERSION < 530)
+               segment_t *n = (segment_t *)segs.getn_area(segs.get_next_area(loadBase));
+#else
+               segment_t *n = get_next_seg(loadBase);
+#endif
+               if (n != NULL) {
+                  dword moduleEnd = getModuleEnd(n->startEA);
+                  if (moduleEnd == 0xffffffff) {
+                     moduleEnd = n->endEA;
+                  }
+                  if ((n->startEA - loadBase) >= nt.OptionalHeader.SizeOfImage) {
+                     found = true;
+                  }
+                  else {
+                     loadBase = (moduleEnd + 0x10000) & ~0xffff;
+                  }
+               }
+               else if ((0x80000000 - loadBase) >= nt.OptionalHeader.SizeOfImage) {
+                  found = true;
+               }
+            }
+            else {
+               dword moduleEnd = getModuleEnd(s->startEA);
+               if (moduleEnd == 0xffffffff) {
+                  moduleEnd = s->endEA;
+               }
+               loadBase = (moduleEnd + 0x10000) & ~0xffff;
+            }
+
+            if (!found && (loadBase >= 0x80000000 || (0x80000000 - loadBase) < nt.OptionalHeader.SizeOfImage)) {
+               if (triedDefault) {
+                  //no room to load this library
+                  qfree(sect);
+                  qfclose(f);
+                  return false;
+               }
+               else {
+                  loadBase = 0x10000000;
+                  triedDefault = true;
+               }
+            }
+         } while (!found);
+         char *base = strrchr(fileName, '\\');
+         if (base == NULL) {
+            base = strrchr(fileName, '/');
+            if (base == NULL) {
+               base = fileName;
+            }
+            else {
+               base++;
+            }
+         }
+         else {
+            base++;
+         }
+         base = ::qstrdup(base);
+
+         char *mod = ::qstrdup(base);
+
+         char *dot = strchr(base, '.');
+         if (dot) {
+            *dot = 0;
+         }
+         createNewSegment(base, loadBase, nt.OptionalHeader.SizeOfImage);
+
+         segment_t *s = getseg(loadBase);
+         dword oep = pe.nt->OptionalHeader.ImageBase + pe.nt->OptionalHeader.AddressOfEntryPoint;
+
+         //set segment registers on new segment to match ES, DS, SS
+#if IDA_SDK_VERSION >= 650
+         set_default_segreg_value(s, R_ds, get_segreg(oep, R_ds));
+         set_default_segreg_value(s, R_es, get_segreg(oep, R_es));
+         set_default_segreg_value(s, R_cs, get_segreg(oep, R_cs));
+         set_default_segreg_value(s, R_ss, get_segreg(oep, R_ss));
+#else
+         SetDefaultRegisterValue(s, R_ds, getSR(oep, R_ds));
+         SetDefaultRegisterValue(s, R_es, getSR(oep, R_es));
+         SetDefaultRegisterValue(s, R_cs, getSR(oep, R_cs));
+         SetDefaultRegisterValue(s, R_ss, getSR(oep, R_ss));
+#endif
+         unsigned char *buf = (unsigned char*)qalloc(nt.OptionalHeader.SizeOfHeaders);
+         qfseek(f, 0, SEEK_SET);
+         qfread(f, buf, nt.OptionalHeader.SizeOfHeaders);
+         patch_many_bytes(loadBase, buf, nt.OptionalHeader.SizeOfHeaders);
+         qfree(buf);
+         for (int i = 0; i < nt.FileHeader.NumberOfSections; i++) {
+            if (qfseek(f, sect[i].PointerToRawData, SEEK_SET) != 0) {
+               //this is a problem
+            }
+            else {
+               buf = (unsigned char*)qalloc(sect[i].SizeOfRawData);
+               if (qfread(f, buf, sect[i].SizeOfRawData) != sect[i].SizeOfRawData) {
+                  //this is a problem
+               }
+               patch_many_bytes(loadBase + sect[i].VirtualAddress, buf, sect[i].SizeOfRawData);
+               qfree(buf);
+            }
+         }
+         //should also account for any "overlay data"
+
+         //file is loaded, now need to process relocations
+         if (loadBase != nt.OptionalHeader.ImageBase) {
+            //image relocated so process relocations
+            dword delta = loadBase - nt.OptionalHeader.ImageBase;
+            if (nt.OptionalHeader.DataDirectory[5].VirtualAddress != 0) {
+               dword reloc = loadBase + nt.OptionalHeader.DataDirectory[5].VirtualAddress;
+               dword end = reloc + nt.OptionalHeader.DataDirectory[5].Size;
+               while (reloc < end) {
+                  dword base = loadBase + get_long(reloc);
+                  dword size = (get_long(reloc + 4) - 8) / 2;
+                  for (dword r = 0; r < size; r++) {
+                     unsigned short v = get_word(reloc + 8 + r * 2);
+                     if ((v & 0xf000) == 0x3000) {
+                        v = v & 0xfff;
+                        patch_long(base + v, get_long(base + v) + delta);
+                     }
+                  }
+                  reloc += get_long(reloc + 4);
+               }
+            }
+         }
+
+         //add to loaded modules list
+         addModuleToPeb(loadBase, mod);
+         addNewModuleNode(mod, loadBase, 0);
+         qfree(mod);
+         
+         //now process imports
+         dword importDir = nt.OptionalHeader.DataDirectory[1].VirtualAddress;
+         if (importDir) {
+            importDir += loadBase;
+            dword dllName;
+            while ((dllName = get_long(importDir + 12)) != 0) {
+               char *name = getString(dllName + loadBase);
+               HandleNode *m = addModule(name, false, 0);
+               free(name);
+               if (m) {
+                  dword iat = get_long(importDir + 16) + loadBase;
+                  dword desc;
+                  while ((desc = get_long(iat)) != 0) {
+                     if (desc & 0x80000000) {
+                        //import by ordinal
+                     }
+                     else {
+                        dword fname = desc + loadBase + 2;
+                        dword f = 0;
+                        if (getHandle(m) & 0x80000000) {
+                           f = iat;
+                        }
+                        else {
+                           f = myGetProcAddress(getHandle(m), fname);
+                        }
+                        do_unknown(iat, 0);
+                        doDwrd(iat, 4);
+                        put_long(iat, f);
+                        makeImportLabel(iat, f);
+                        if (f) {
+                           char *funcname = getString(fname);
+                           checkForHook(funcname, f, getId(m));
+                           free(funcname);
+                        }
+                     }
+                     iat += 4;
+                  }
+               }
+               importDir += 0x14;  //sizeof(IMAGE_IMPORT_DESCRIPTOR)
+            }
+         }
+         
+         //make code at dll entry point(s)
+         char *ep = (char*)qalloc(strlen(base) + 20);
+         ::qsnprintf(ep, strlen(base) + 20, "%s_DllEntryPoint", base);
+         qfree(base);
+         add_entry(loadBase + nt.OptionalHeader.AddressOfEntryPoint, loadBase + nt.OptionalHeader.AddressOfEntryPoint, ep, true);
+         qfree(ep);
+
+         //apply names for all exports
+         dword exportTable = nt.OptionalHeader.DataDirectory[0].VirtualAddress + loadBase;
+         if (exportTable != 0) {
+            dword non = get_long(exportTable + 24);
+            dword funcTable = loadBase + get_long(exportTable + 28);
+            dword nameTable = loadBase + get_long(exportTable + 32);
+            dword ordTable = loadBase + get_long(exportTable + 36);
+            for (dword nm = 0; nm < non; nm++) {
+               dword nameAddr = loadBase + get_long(nameTable + nm * 4);
+               char *name = getString(nameAddr);
+               unsigned short ord = get_word(ordTable + nm * 2);
+               dword func = loadBase + get_long(funcTable + ord * 4);
+               add_entry(func, func, name, true);
+               free(name);
+            }
+         }
+
+         //apply header structure templates
+         applyPEHeaderTemplates(loadBase);
+
+         //offer to return loadBase in eax??
+         //run through DllEntryPoint code??
+
+         qfree(sect);
+         qfclose(f);
+         msg("x86emu: Loaded %s at address 0x%X, entry point is 0x%x\n", 
+              fileName, loadBase, loadBase + nt.OptionalHeader.AddressOfEntryPoint);
+         return true;
+      }
+   }
+   return false;
+}
+
 //skip the instruction at eip
 void skip() {
    //this relies on IDA's decoding, not our own
@@ -762,7 +1091,7 @@ void grabStackBlock() {
          updateRegisterDisplay(ESP);
       }
       else {
-         showErrorMessage("No bytes were allocated in the stack"); 
+         showErrorMessage("No bytes were allocated in the stack");
       }
    }
 }
@@ -843,7 +1172,7 @@ void traceOne() {
 }
 
 //let the emulator run
-//only stops when it hist a breakpoint or when 
+//only stops when it hist a breakpoint or when
 //signaled to break
 void run() {
    ThreadNode *currThread = activeThread;
@@ -851,8 +1180,10 @@ void run() {
    showWaitCursor();
    //tell the cpu that we want to run free
    shouldBreak = 0;
+   //always execute at least one instruction this helps when
+   //we are running from an existing breakpoint
+   executeInstruction();
    while (!isBreakpoint(cpu.eip) && !shouldBreak) {
-//                  pump(hwndDlg);
       executeInstruction();
    }
    syncDisplay();
@@ -869,6 +1200,9 @@ void trace() {
    showWaitCursor();
    //tell the cpu that we want to run free
    shouldBreak = 0;
+   //always execute at least one instruction this helps when
+   //we are running from an existing breakpoint
+   executeInstruction();
    while (!isBreakpoint(cpu.eip) && !shouldBreak) {
       executeInstruction();
    }
@@ -893,7 +1227,7 @@ static int idaapi uiCallback(void * /*cookie*/, int code, va_list /*va*/) {
       //
 #ifdef DEBUG
       msg(PLUGIN_NAME": ui_saving notification\n");
-#endif      
+#endif
       Buffer *b = new Buffer();
       x86emu_node.create(x86emu_node_name);
       if (saveState(x86emu_node) == X86EMUSAVE_OK) {
@@ -936,40 +1270,44 @@ static int idaapi uiCallback(void * /*cookie*/, int code, va_list /*va*/) {
 void setPEimageBase() {
    netnode pe_node("$ PE header");
    peImageBase = (dword)pe_node.altval((nodeidx_t)-2);
-   
+
    if (peImageBase == 0) {
       //could not find $ PE header
       segment_t *h = getnseg(0);   //peek at first segment
+      if (h == NULL) {
+         return;
+      }
       dword addr = (dword)h->startEA;
       if (get_word(addr) == DOS_MAGIC) {
          peImageBase = addr;
       }
    }
-}   
+}
 
 static void loadBaseCommon() {
    if (inf.filetype == f_PE) {
       setPEimageBase();
-      //there has got to be a better way to choose til 
+      //there has got to be a better way to choose til
       //or detect what is already loaded
       init_til("mssdk.til");
-   }      
+   }
    else if (inf.filetype == f_ELF) {
-      //there has got to be a better way to choose til 
+      //there has got to be a better way to choose til
       //or detect what is already loaded
       init_til("gnuunx.til");
-   }      
+   }
    else if (inf.filetype == f_PDF) {
       peImageBase = 0x400000;
       init_til("mssdk.til");
    }
 
    setUnemulatedCB(EmuUnemulatedCB);
-
+/*
    if (idpHooked) {
       idpHooked = false;
       unhook_from_notification_point(HT_IDP, idpCallback, NULL);
    }
+*/
 }
 
 //
@@ -985,8 +1323,15 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
       //
 #ifdef DEBUG
       msg(PLUGIN_NAME": newfile notification\n");
-#endif  
+#endif
       loadBaseCommon();
+      break;
+   }
+   case processor_t::closebase: {
+#ifdef DEBUG
+      msg(PLUGIN_NAME": closebase notification\n");
+#endif
+      clearFunctionInfoList();
       break;
    }
    case processor_t::oldfile: {
@@ -996,24 +1341,24 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
          unsigned char *buf = NULL;
          size_t sz;
          msg("x86emu: Loading ModuleInfo state from existing netnode.\n");
-   
+
          if ((buf = (unsigned char *)module_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
             Buffer b(buf, sz);
             loadModuleData(b);
          }
       }
-   
+
       //
       // See if there's a previous CPU state in this database that can
       // be used.
-      //   
+      //
       if (netnode_exist(x86emu_node)) {
          //netnode should only exist if emulator was previously run
          // There's an x86emu node in the database.  Attempt to
          // instantiate the CPU state from it.
          msg("x86emu: Loading x86emu state from existing netnode.\n");
          dword loadStatus = loadState(x86emu_node);
-   
+
          if (loadStatus == X86EMULOAD_OK) {
             cpuInit = true;
          }
@@ -1021,19 +1366,19 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
             //probably shouldn't continue trying to init emulator at this point
             msg("x86emu: Error restoring x86emu state: %d.\n", loadStatus);
          }
-   
+
          randVal = (unsigned int)x86emu_node.altval(X86_RANDVAL);
-   
+
          if (randVal == 0) {
             do {
                getRandomBytes(&randVal, 4);
             } while (randVal == 0);
             x86emu_node.altset(X86_RANDVAL, randVal);
          }
-   
+
          baseTime.dwLowDateTime = (DWORD)x86emu_node.altval(SYSTEM_TIME_LOW);
          baseTime.dwHighDateTime = (DWORD)x86emu_node.altval(SYSTEM_TIME_HIGH);
-         
+
          os_personality = (unsigned int)x86emu_node.altval(OS_PERSONALITY);
       }
       else {
@@ -1074,7 +1419,7 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
          unsigned char *buf = NULL;
          size_t sz;
          msg("x86emu: Loading FunctionInfo state from existing netnode.\n");
-   
+
          if ((buf = (unsigned char *)funcinfo_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
             Buffer b(buf, sz);
             loadFunctionInfo(b);
@@ -1086,16 +1431,16 @@ static int idaapi idpCallback(void * /*cookie*/, int code, va_list /*va*/) {
          unsigned char *buf = NULL;
          size_t sz;
          msg("x86emu: Loading PETable state from existing netnode.\n");
-   
+
          if ((buf = (unsigned char *)petable_node.getblob(NULL, &sz, 0, 'B')) != NULL) {
             Buffer b(buf, sz);
             pe.loadTables(b);
          }
          if (!pe.valid) {
             petable_node.kill();
-         }  
+         }
       }
-      
+
       loadBaseCommon();
       break;
    }
@@ -1111,7 +1456,7 @@ void dumpHeap() {
    while (n) {
       unsigned int sz = n->getSize();
       unsigned int base = n->getBase();
-      msg("   0x%x-0x%x (0x%x bytes)\n", base, base + sz - 1, sz); 
+      msg("   0x%x-0x%x (0x%x bytes)\n", base, base + sz - 1, sz);
       n = n->nextNode();
    }
 }
@@ -1162,7 +1507,7 @@ void setBreakpoint() {
    char *bpt = inputBox("Set Breakpoint", "Specify breakpoint location", loc);
    if (bpt) {
       dword bp = strtoul(bpt, NULL, 0);
-//                  sscanf(value, "%X", &bp);                
+//                  sscanf(value, "%X", &bp);
       addBreakpoint(bp);
    }
 }
@@ -1277,12 +1622,15 @@ void loadResources(FILE *f) {
 
 dword PELoadHeaders() {
    dword addr = 0;
-      
+
    if (peImageBase == 0) {
       int nsegs = get_segm_qty();
       //loop through segs looking for MZ
       for (int i = 0; i < nsegs; i++) {
          segment_t *h = getnseg(i);
+         if (h == NULL) {
+            continue;
+         }
          if (get_word(h->startEA) == DOS_MAGIC) {
             addr = (dword)h->startEA;
 //            msg("peImageBase missing, trying %x\n", addr);
@@ -1295,7 +1643,7 @@ dword PELoadHeaders() {
    }
 #ifdef DEBUG
    msg(PLUGIN_NAME": peImageBase set to 0x%08x\n", peImageBase);
-#endif      
+#endif
    segment_t s;
    if (get_word(addr) == DOS_MAGIC) {
       peImageBase = addr;
@@ -1339,25 +1687,25 @@ dword PELoadHeaders() {
          IMAGE_SECTION_HEADER *sect;
          addr = (dword)s.startEA;
          dword need = (dword)s.endEA - addr;
-   
+
          byte *buf = (byte*)malloc(need);
          fread(buf, 1, need, f);
          dos = (IMAGE_DOS_HEADER*)buf;
 
          nt = (IMAGE_NT_HEADERS*)(buf + dos->e_lfanew);
          sect = (IMAGE_SECTION_HEADER*)(nt + 1);
-   
+
          pe.setBase(nt->OptionalHeader.ImageBase);
          pe.setNtHeaders(nt);
          pe.setSectionHeaders(nt->FileHeader.NumberOfSections, sect);
-   
+
          need = sect[0].PointerToRawData;
          patch_many_bytes(s.startEA, buf, nt->OptionalHeader.SizeOfHeaders);
-   
+
          applyPEHeaderTemplates(addr);
-   
+
          free(buf);
-   
+
          pe.buildThunks(f);
          loadResources(f);
          fclose(f);
@@ -1422,17 +1770,63 @@ void initListEntry(dword le) {
    patch_long(le + 4, le);          //Blink
 }
 
-void initPebLdrData(dword pebLdrData) {
+dword mapNtDataPage(HandleNode *ntdll) {
+   dword res = 0;
+   dword pe = ntdll->handle + get_long(ntdll->handle + 0x3c);
+#ifdef DEBUG
+   msg("mapNtDataPage: ntdll - 0x%x, pe: 0x%x\n", ntdll, pe);
+#endif
+   //24 == sizeof(Signature) + sizeof(IMAGE_FILE_HEADER)
+   dword sect = pe + 24 + get_word(pe + 4 + 16);  //SizeOfOptionalHeader
+   int nsect = get_word(pe + 4 + 2);         //NumberOfSections
+#ifdef DEBUG
+   msg("mapNtDataPage: nsect - %d\n", nsect);
+#endif
+   for (int i = 0; i < nsect; i++) {
+      char *sname = getString(sect);
+      sect += sizeof(IMAGE_SECTION_HEADER);
+      int match = strcmp(sname, ".data");
+      free(sname);
+      if (match == 0) {
+         res = ntdll->handle + get_long(sect + 12);
+         //only map one page, could map more
+         createSegment(res, 0x1000, NULL, 0, "ntdll.data");
+      }
+   }
+   return res;
+}
+
+//void initPebLdrData(dword pebLdrData) {
+void initPebLdrData(dword pebBase) {
+   HandleNode *k32 = addModule("kernel32.dll", false, 0, false);
+   HandleNode *ntdll = addModule("ntdll.dll", false, 0, false);
+   dword pebLdrData;
+#ifdef DEBUG
+   msg(PLUGIN_NAME": trying to map NtDataPage\n");
+#endif
+   dword ntdata = mapNtDataPage(ntdll);
+#ifdef DEBUG
+   msg(PLUGIN_NAME": NtDataPage mapped\n");
+#endif
+   if (ntdata) {
+      pebLdrData = ntdata + 0x880;
+   }
+   else {
+      pebLdrData = HeapBase::getHeap()->malloc(0x24);  //PEB_LDR_DATA_SIZE
+   }
+#ifdef DEBUG
+   msg(PLUGIN_NAME": pebLdrData set\n");
+#endif
+
+   patch_long(pebBase + PEB_LDR_DATA, pebLdrData);
+
 //   dword moduleList = pebLdrData + 0x1C;
-   patch_long(pebLdrData - 4, 0);              //Count of loaded modules
    patch_long(pebLdrData, 0x24);              //Length
    patch_long(pebLdrData + 4, 1);          //Initialized
 
    initListEntry(pebLdrData + 0xC);  //InLoadOrderModuleList
    initListEntry(pebLdrData + 0x14);  //InMemoryOrderModuleList
    initListEntry(pebLdrData + 0x1C);  //InInitializationOrderModuleList
-
-//   addModuleToPeb(0xdeadbeef, "ntdll.dll", true);  //placeholder for ntdll.dll
 
    char buf[260], *fname;
 #if (IDA_SDK_VERSION < 490)
@@ -1443,10 +1837,21 @@ void initPebLdrData(dword pebLdrData) {
    fname = buf;
 #endif
 
+#ifdef DEBUG
+   msg(PLUGIN_NAME": adding file to peb modules\n");
+#endif
    addModuleToPeb(peImageBase, fname, true);
-   addModule("kernel32.dll", true, 0);
-   addModule("ntdll.dll", true, 0);
-//   msg("peb modules added\n");
+#ifdef DEBUG
+   msg(PLUGIN_NAME": adding kernel32 to peb modules\n");
+#endif
+   addModuleToPeb(k32, true);
+#ifdef DEBUG
+   msg(PLUGIN_NAME": adding ntdll to peb modules\n");
+#endif
+   addModuleToPeb(ntdll, true);
+#ifdef DEBUG
+   msg(PLUGIN_NAME": peb modules added\n");
+#endif
 }
 
 const char *win_xp_env[] = {
@@ -1555,8 +1960,8 @@ Buffer *makeLinuxEnv(const char *env[], const char *userName, const char *hostNa
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
 int idaapi idb_hook(void * /*user_data*/, int notification_code, va_list va) {
    if (notification_code == idb_event::byte_patched) {
-      // A byte has been patched                      
-      // in: ea_t ea                                  
+      // A byte has been patched
+      // in: ea_t ea
       ea_t ea = va_arg(va, ea_t);
       segment_t *st = get_segm_by_name(".stack");
       if (st && st->contains(ea)) {
@@ -1622,21 +2027,23 @@ dword createWindowsPEB() {
    MemMgr::mmap(pebBase, 0x1000, 0, 0, ".peb");
    patch_long(pebBase, 0);              //zero out BeingDebugged flag
    patch_long(pebBase + PEB_IMAGE_BASE, peImageBase);
-   
+
    dword heapBase = (x86emu_node.altval(X86_MAXEA) + 0x1000) & 0xfffff000;
    dword heap = addHeapCommon(0x10000, heapBase);
    patch_long(pebBase + PEB_MAX_HEAPS, (0x1000 - SIZEOF_PEB) / 4);   //0x1000 == PAGE_SIZE
    patch_long(pebBase + PEB_PROCESS_HEAP, heap);
    patch_long(pebBase + PEB_NUM_HEAPS, 1);
    patch_long(pebBase + SIZEOF_PEB + 4, heap);
-   
+
    // NEED TO MOVE LdrData out of the PEB
-   // space from end of PEB to end of page is dedicated to 
+   
+   // space from end of PEB to end of page is dedicated to
    // heap admin
-   dword pebLdrData = pebBase + 0x200;   //usually inside ntdll.dll
-   patch_long(pebBase + PEB_LDR_DATA, pebLdrData);
-   initPebLdrData(pebLdrData);
-//   msg("peb created\n");
+   initPebLdrData(pebBase);
+
+#ifdef DEBUG
+   msg(PLUGIN_NAME": eb created\n");
+#endif
 
    patch_long(pebBase + PEB_TLS_BITMAP, pebBase + PEB_TLS_BITMAP_BITS);
    patch_long(pebBase + PEB_TLS_EXP_BITMAP, pebBase + PEB_TLS_EXP_BITMAP_BITS);
@@ -1655,10 +2062,11 @@ dword createWindowsPEB() {
       patch_word(env_buf + 2 * i, eb[i]);
    }
    delete env;
-   
+
    //allocate process parameters in heap right after env
-   dword proc_parms = HeapBase::getHeap()->calloc(SIZEOF_PROCESS_PARAMETERS, 1);
-   
+   //add 8 extra bytes for two additional char* windowTitle and desktopInfo
+   dword proc_parms = HeapBase::getHeap()->calloc(SIZEOF_PROCESS_PARAMETERS + 8, 1);
+
    //command line needs to be pointed to by UNICODE_STRING at proc_parms + 0x40
    //need interface to accept command line from user
    const char *cmdLine = "dummy";
@@ -1675,6 +2083,11 @@ dword createWindowsPEB() {
    }
 
    patch_long(pebBase + PEB_PROCESS_PARMS, proc_parms);
+
+   patch_long(proc_parms + 0x18, 3);    //StandardInput
+   patch_long(proc_parms + 0x1C, 15);   //StandardOutput
+   patch_long(proc_parms + 0x20, 15);   //StandardError
+
    patch_word(proc_parms + 0x40, cmdLineLen * 2);
    patch_word(proc_parms + 0x42, cmdLineLen * 2);
    patch_long(proc_parms + 0x44, cmd_line);
@@ -1682,16 +2095,54 @@ dword createWindowsPEB() {
 
    x86emu_node.altset(EMU_COMMAND_LINE, pCmdLineA);
 
+   //WindowTitle
+   char buf[260], *window;
+#if (IDA_SDK_VERSION < 490)
+   window = get_input_file_path();
+#else
+//   get_input_file_path(buf, sizeof(buf));
+   get_root_filename(buf, sizeof(buf));
+   window = buf;
+#endif
+   dword ulen = strlen(window) + 1;
+   dword pWindow = HeapBase::getHeap()->malloc(ulen * 2);
+   //copy desktop line to this location as WCHAR
+   for (dword i = 0; i < ulen; i++) {
+      patch_word(pWindow + 2 * i, window[i]);
+      patch_byte(pWindow + ulen * 2 + i, window[i]);
+   }
+   patch_word(proc_parms + 0x70, ulen * 2);
+   patch_word(proc_parms + 0x72, ulen * 2);
+   patch_long(proc_parms + 0x74, pWindow);
+
+   patch_long(proc_parms + SIZEOF_PROCESS_PARAMETERS, pWindow + ulen * 2);
+
+   //DesktopInfo
+   char *desktop = "Winsta0\\Default";
+   ulen = strlen(desktop) + 1;
+   dword pDesktop = HeapBase::getHeap()->malloc(ulen * 3);
+   //copy desktop line to this location as WCHAR
+   for (dword i = 0; i < ulen; i++) {
+      patch_word(pDesktop + 2 * i, desktop[i]);
+      patch_byte(pDesktop + ulen * 2 + i, desktop[i]);
+   }
+
+   patch_word(proc_parms + 0x78, ulen * 2);
+   patch_word(proc_parms + 0x7a, ulen * 2);
+   patch_long(proc_parms + 0x7c, pDesktop);
+
+   patch_long(proc_parms + SIZEOF_PROCESS_PARAMETERS + 4, pDesktop + ulen * 2);
+
    patch_long(pebBase + PEB_OS_MAJOR, OSMajorVersion);   //varies with o/s personality
    patch_long(pebBase + PEB_OS_MINOR, OSMinorVersion);   //varies with o/s personality
    patch_long(pebBase + PEB_OS_BUILD, OSBuildNumber);   //varies with o/s personality
    patch_long(pebBase + PEB_OS_PLATFORM_ID, 2);    //OSPlatformId
-   
+
    return pebBase;
 }
 
-void createWindowsTEB(dword peb) {   
-   //teb address is highest address not occupied by peb, additional tebs are 
+void createWindowsTEB(dword peb) {
+   //teb address is highest address not occupied by peb, additional tebs are
    //allocated in stack fashion at next lower page in memory, skiping peb page
    //is necessary
    ebx = peb;       //peb
@@ -1700,20 +2151,20 @@ void createWindowsTEB(dword peb) {
 
    threadList = activeThread = new ThreadNode();
    dword tid = activeThread->id;
-   
+
    dword pid = 0;
    getRandomBytes(&pid, 2);
    pid = (pid % 3000) + 1000;
-   
+
    patch_long(fsBase + TEB_PROCESS_ID, pid);
    patch_long(fsBase + TEB_THREAD_ID, tid);
 
    patch_long(fsBase + TEB_LINEAR_ADDR, fsBase);  //teb self pointer
-   patch_long(fsBase + TEB_PEB_PTR, ebx);     //peb self pointer   
-   
+   patch_long(fsBase + TEB_PEB_PTR, ebx);     //peb self pointer
+
    createWindowsStack(0x130000, 0x4000);
-   patch_long(fsBase + TEB_STACK_TOP, 0x130000);     //top of stack   
-   patch_long(fsBase + TEB_STACK_BOTTOM, 0x130000 - 0x4000);     //bottom of stack   
+   patch_long(fsBase + TEB_STACK_TOP, 0x130000);     //top of stack
+   patch_long(fsBase + TEB_STACK_BOTTOM, 0x130000 - 0x4000);     //bottom of stack
 
    push(0, SIZE_DWORD);
    push(nt.OptionalHeader.AddressOfEntryPoint + nt.OptionalHeader.ImageBase, SIZE_DWORD);
@@ -1747,8 +2198,9 @@ void createWindowsTEB(dword peb) {
    //need a reliable way to determine the offset into kernel32
    //could just use the address of TerminateProcess
    push(0x16fd7 + k32, SIZE_DWORD);
-   
-//   msg("teb created\n");
+#ifdef DEBUG
+   msg(PLUGIN_NAME": teb created\n");
+#endif
 }
 
 void createWindowsProcess() {
@@ -1824,11 +2276,11 @@ void buildElfMainArgs() {
       free(args);
    }
    argv = esp;
-   
+
    push(envp, SIZE_DWORD);
    push(argv, SIZE_DWORD);
    push(argc, SIZE_DWORD);
-   
+
    //push address in start for main to return to
    push(0xbadf00d, SIZE_DWORD);  //dummy return address
    syncDisplay();
@@ -1925,20 +2377,20 @@ void buildElfEnvironment(dword elf_base) {
    esp -= env_len;
    put_many_bytes(esp, eb, env_len);
    elfEnvStart = esp;
-   
+
    //add argument strings, for now only exe name
    dword argc = 1;
    esp -= len;
    put_many_bytes(esp, fname, len);
    elfArgStart = esp;
-   
+
    esp &= 0xFFFFFFFC;
-   
+
    //need to create elf tables in here as well
 
    esp -= 5;
    put_many_bytes(esp, "i686", 5);
-   
+
    dword platform = esp;
 
    unsigned char rbytes[16];
@@ -2048,8 +2500,8 @@ void buildElfEnvironment(dword elf_base) {
       argc++;
       while (get_byte(loc++)) {}
    }
-   
-   push(argc, SIZE_DWORD);      
+
+   push(argc, SIZE_DWORD);
 }
 
 void createElfStack() {
@@ -2090,7 +2542,7 @@ bool haveHeapSegment() {
 //
 int idaapi init(void) {
    cpuInit = false;
-   
+
    if (strcmp(inf.procName, "metapc")) return PLUGIN_SKIP;
 
 //   msg(PLUGIN_NAME": hooking idp\n");
@@ -2111,7 +2563,7 @@ int idaapi init(void) {
 void idaapi term(void) {
 #ifdef DEBUG
    msg(PLUGIN_NAME": term entered\n");
-#endif   
+#endif
    if (hProv) {
 #ifdef __NT__
       CryptReleaseContext(hProv, 0);
@@ -2127,13 +2579,14 @@ void idaapi term(void) {
    if (idpHooked) {
       idpHooked = false;
       unhook_from_notification_point(HT_IDP, idpCallback, NULL);
-   }   
+   }
 #if IDA_SDK_VERSION >= 510      //HT_IDB introduced in SDK 510
    if (idbHooked) {
       idbHooked = false;
       unhook_from_notification_point(HT_IDB, idb_hook, NULL);
    }
 #endif
+   clearFunctionInfoList();
    destroyEmulatorWindow();
    closeTrace();
    doTrace = false;
@@ -2141,7 +2594,7 @@ void idaapi term(void) {
    doLogLib = false;
 #ifdef DEBUG
    msg(PLUGIN_NAME": term exiting\n");
-#endif   
+#endif
 }
 
 //--------------------------------------------------------------------------
@@ -2176,9 +2629,9 @@ void idaapi run(int /*arg*/) {
                patch_byte(i, 0);
             }
          }
-         
+
          x86emu_node.altset(X86_MINEA, inf.minEA);
-         
+
          s = get_last_seg();
          if (s && (s->endEA & 0xFFF)) {
             dword currend = (dword)s->endEA;
@@ -2188,14 +2641,14 @@ void idaapi run(int /*arg*/) {
                patch_byte(i, 0);
             }
          }
-         
+
          x86emu_node.altset(X86_MAXEA, inf.maxEA);
          getRandomBytes(&randVal, 4);
          x86emu_node.altset(X86_RANDVAL, randVal);
-   
+
          x86emu_node.altset(SYSTEM_TIME_LOW, baseTime.dwLowDateTime);
          x86emu_node.altset(SYSTEM_TIME_HIGH, baseTime.dwHighDateTime);
-         
+
          getRandomBytes(&tsc, 6);
          char *t = (char*)&tsc;
          t[5] &= 3;              //truncate time somewhat
@@ -2204,7 +2657,7 @@ void idaapi run(int /*arg*/) {
          if (inf.filetype == f_PE || inf.filetype == f_PDF) {
             //need to allow this to be user selectable at some point
             os_personality = PERS_WINDOWS_XP;
-            
+
             kernel_node.altset(OS_MAX_FILES, WIN_MAX_FILES);
             kernel_node.altset(OS_PAGE_SIZE, WIN_PAGE_SIZE);
             kernel_node.altset(OS_STACK_TOP, WIN_STACK_TOP);
@@ -2215,7 +2668,7 @@ void idaapi run(int /*arg*/) {
             kernel_node.altset(OS_IDT_LIMIT, WIN_IDT_LIMIT);
             kernel_node.altset(OS_GDT_BASE, WIN_GDT_BASE);
             kernel_node.altset(OS_GDT_LIMIT, WIN_GDT_LIMIT);
-            
+
          }
          else if (inf.filetype == f_ELF) {
             //need to allow this to be user selectable at some point
@@ -2236,8 +2689,8 @@ void idaapi run(int /*arg*/) {
             kernel_node.altset(OS_LINUX_BRK, inf.maxEA);
          }
          x86emu_node.altset(OS_PERSONALITY, os_personality);
-      }      
-      
+      }
+
       //test for presence of personality
       //show personality dialog based on file type
       //differs for PE vs ELF
@@ -2254,11 +2707,17 @@ void idaapi run(int /*arg*/) {
             push(0, SIZE_DWORD);
             dword pe_offset = headerBase + get_long(headerBase + 0x3C);
             get_many_bytes(pe_offset, &nt, sizeof(nt));
-   
+
             if (pe.valid) {
                msg("pe struct is valid, calling doImports\n");
                createWindowsProcess();
+#ifdef DEBUG
+               msg(PLUGIN_NAME": windows process created\n");
+#endif
                doImports(pe);
+#ifdef DEBUG
+               msg(PLUGIN_NAME": imports have been processed\n");
+#endif
             }
             else {
                msg("x86emu: invalid pe table struct\n");
@@ -2291,14 +2750,14 @@ void idaapi run(int /*arg*/) {
             esi = 0xffffffff;
             ecx = esp - 0x14;
             ebp = 0x12fff0;
-            
+
             cpu.eflags |= 0x3000;  //ring 3
-            
+
             idtBase = WIN_IDT_BASE;
             idtLimit = WIN_IDT_LIMIT;
             gdtBase = WIN_GDT_BASE;
             gdtLimit = WIN_GDT_LIMIT;
-            
+
          }
          else { //"elf" and others land here
             //need to properly handle brk and heap creation
@@ -2326,7 +2785,7 @@ void idaapi run(int /*arg*/) {
          initGDTR(gdtBase, gdtLimit);
       }
 
-      pCmdLineA = (dword)x86emu_node.altval(EMU_COMMAND_LINE);  
+      pCmdLineA = (dword)x86emu_node.altval(EMU_COMMAND_LINE);
 
 #if IDA_SDK_VERSION >= 530
       TForm *stackForm = open_disasm_window("Stack");
@@ -2348,7 +2807,7 @@ void idaapi run(int /*arg*/) {
       hook_to_notification_point(HT_UI, uiCallback, NULL);
       register_funcs();
    }
-   
+
 }
 
 //--------------------------------------------------------------------------

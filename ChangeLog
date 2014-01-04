@@ -1,3 +1,24 @@
+* 1/4/14
+  Updated for compatibility with Ida 6.5 SDK. Visual Studio builds (Ida <= 5.7) now use
+  VS 2010+. Added color highlighting for register changes while stepping.
+
+* 4/27/13
+  Added emulations for LocalRealloc, LocalLock, LocakUnlock, FreeLibrary
+  Better handling for empty name tables in DLLs
+  Derive fake name for functions that are exported by ordinal only
+
+* 3/30/13
+  Fixed bug when saving and restoring emulation heap state.
+  Added HeapBase::sizeOf function to query size of an allocated block
+  Added emulation for GetStdHandle, GetStartupInfo, GetWindowsDirectory, GetSystemDirectory
+  Initial emulation for GetCPInfo, WideCharToMultiByte, MultiByteToWideChar, GetStringType, LCMapString
+  Added feature to load additional Windows dlls into existing database.
+
+* 3/1/13
+  Added FPU state update for many more FPU instructions
+  Fixed problem of failing to run/trace when resuming from 
+  an existing breakpoint
+
 * 01/24/13
   Added build for Ida64
   Release version 1.0.7

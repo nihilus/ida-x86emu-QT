@@ -93,6 +93,7 @@ public slots:
    void pushData();
    void setMemory();
    void segments();
+   void loadLibrary();
    
 public:
    QLineEdit *QEAX;

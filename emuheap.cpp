@@ -31,6 +31,7 @@
 #include <segment.hpp>
 #include <ua.hpp>
 #include <bytes.hpp>
+#include <kernwin.hpp>
 
 #include "emuheap.h"
 #include "memmgr.h"
@@ -47,11 +48,13 @@ MallocNode::MallocNode(unsigned int size, unsigned int base) {
 MallocNode::MallocNode(Buffer &b) {
    b.read((char*)&base, sizeof(base));
    b.read((char*)&size, sizeof(size));
+//   msg("x86emu:    loading malloc block(0x%x, 0x%x)\n", base, size);
 }
 
 void MallocNode::save(Buffer &b) {
    b.write((char*)&base, sizeof(base));
    b.write((char*)&size, sizeof(size));
+//   msg("x86emu:    storing malloc block(0x%x, 0x%x)\n", base, size);
 }
 
 //need at least one non-inline function from HeapBase so that
@@ -101,15 +104,19 @@ EmuHeap::EmuHeap(Buffer &b) {
    unsigned int num_heaps;
    b.read((char*)&num_heaps, sizeof(num_heaps));  //how many heaps
    
+//   msg("Loading %d heaps\n", num_heaps);
+   
    EmuHeap *p = NULL;
    for (unsigned int i = 0; i < num_heaps; i++) {
       b.read((char*)&n, sizeof(n));
+//      msg("Loading heap #%d\n", i);
       if (p) {
          p->nextHeap = new EmuHeap(b, n);
          p = (EmuHeap*)p->nextHeap;
       }
       else {
          readHeap(b, n);
+         p = this;
       }
    }
 }
@@ -119,6 +126,7 @@ void EmuHeap::readHeap(Buffer &b, unsigned int num_blocks) {
    b.read((char*)&base, sizeof(base));
    b.read((char*)&size, sizeof(size));
    b.read((char*)&max, sizeof(max));
+//   msg("x86emu: Reading heap(0x%x, 0x%x, 0x%x)\n", base, size, max);
    for (unsigned int i = 0; i < num_blocks; i++) {
       insert(new MallocNode(b));
    }
@@ -129,6 +137,7 @@ void EmuHeap::writeHeap(Buffer &b) {
    unsigned int n = 0;
    MallocNode *m;
    for (m = head; m; m = m->next) n++;
+//   msg("x86emu: Writing heap(0x%x, 0x%x, 0x%x) with %d nodes\n", base, size, max, n);
    b.write((char*)&n, sizeof(n));
    b.write((char*)&base, sizeof(base));
    b.write((char*)&size, sizeof(size));
@@ -147,7 +156,9 @@ void EmuHeap::save(Buffer &b) {
    for (h = this; h; h = (EmuHeap*)h->nextHeap) num_heaps++;
 
    b.write((char*)&num_heaps, sizeof(num_heaps));
-   
+
+//   msg("x86emu: writing %d heaps\n", num_heaps);
+
    //write all of the heaps
    for (h = this; h; h = (EmuHeap*)h->nextHeap) {
       h->writeHeap(b);
@@ -244,6 +255,8 @@ unsigned int EmuHeap::realloc(unsigned int ptr, unsigned int size) {
          }
          else {
             //node growing, allocate new block
+            //*** check to see if following block is free and 
+            //we can just grow the existing block
             result = this->malloc(size);
             if (result != HEAP_ERROR) {
                //copy the old block into the new larger block
@@ -285,6 +298,11 @@ MallocNode *EmuHeap::findMallocNode(unsigned int addr) {
       }
    }
    return result;
+}
+
+unsigned int EmuHeap::sizeOf(unsigned int addr) {
+   MallocNode *result = findMallocNode(addr);
+   return result ? result->size : 0xffffffff;
 }
 
 bool EmuHeap::checkHeapSize(unsigned int newsize) {

@@ -60,6 +60,8 @@ public:
    virtual unsigned int getHeapBase() {return base;};
    virtual unsigned int getHeapSize() {return max - base;};
    HeapBase *getNextHeap() {return nextHeap;};
+
+   virtual unsigned int sizeOf(unsigned int addr) = 0;
    
    //careful to avoid memory leaks when calling this!
    void setNextHeap(HeapBase *heap) {nextHeap = heap;};
@@ -110,6 +112,8 @@ public:
    unsigned int getHeapBase() {return base;};
    unsigned int getHeapSize() {return max - base;};
    HeapBase *getNextHeap() {return nextHeap;};
+
+   unsigned int sizeOf(unsigned int addr);
    
    //careful to avoid memory leaks when calling this!
    void setNextHeap(HeapBase *heap) {nextHeap = heap;};
