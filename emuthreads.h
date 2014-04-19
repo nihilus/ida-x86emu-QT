@@ -31,15 +31,15 @@
 class ThreadNode {
 public:
    ThreadNode();
-   ThreadNode(dword threadFunc, dword threadArg);
-   ThreadNode(Buffer &b, dword currentActive);
+   ThreadNode(unsigned int threadFunc, unsigned int threadArg);
+   ThreadNode(Buffer &b, unsigned int currentActive);
    
    void save(Buffer &b, bool saveStack);
 
-   dword handle;
-   dword id;
-   dword hasStarted;
-   dword threadArg;
+   unsigned int handle;
+   unsigned int id;
+   unsigned int hasStarted;
+   unsigned int threadArg;
    Registers regs;
    ThreadNode *next;
 };
@@ -50,12 +50,12 @@ extern ThreadNode *activeThread;
 /*
  * return thread handle for new thread
  */
-ThreadNode *emu_create_thread(dword threadFunc, dword threadArg);
+ThreadNode *emu_create_thread(unsigned int threadFunc, unsigned int threadArg);
 
 /*
  * destroy the thread indicated by threadId
  */
-ThreadNode *emu_destroy_thread(dword threadId);
+ThreadNode *emu_destroy_thread(unsigned int threadId);
 
 /*
  * switch threads
@@ -65,7 +65,7 @@ void emu_switch_threads(ThreadNode *new_thread);
 /*
  * locate the thread with the given handle
  */
-ThreadNode *findThread(dword handle);
+ThreadNode *findThread(unsigned int handle);
 
 #define TEB_SEH_FRAME 0
 #define TEB_STACK_TOP 4

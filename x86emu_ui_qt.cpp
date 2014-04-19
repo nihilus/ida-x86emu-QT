@@ -65,7 +65,8 @@ X86Dialog *x86Dlg;
 
 QValidator::State AllIntValidator::validate(QString &input, int & /*pos*/) const {
    char *endptr;
-   char *nptr = input.toAscii().data();
+   QByteArray qba = input.toAscii(); 
+   char *nptr = qba.data();
    if (*nptr == 0 || stricmp("0x", nptr) == 0) {
       return Intermediate;
    }
@@ -168,7 +169,7 @@ void updateRegisterControl(int controlID) {
 
 //get an int value from edit box string
 //assumes value is a valid hex string
-dword getEditBoxInt(QLineEdit *l) {
+unsigned int getEditBoxInt(QLineEdit *l) {
    return strtoul(l->text().toAscii().data(), NULL, 0);
 }
 
@@ -217,7 +218,8 @@ char *getSaveFileName(const char *title, char *fileName, int nameSize, const cha
    QString f = QFileDialog::getSaveFileName(getWidgetParent(), title,
                                             QString(), filter);
    if (!f.isNull()) {
-      ::qstrncpy(fileName, f.toAscii().data(), nameSize);
+      QByteArray qba = f.toAscii();
+      ::qstrncpy(fileName, qba.data(), nameSize);
       return fileName;
    }
    return NULL;
@@ -233,7 +235,8 @@ char *getDirectoryName(const char *title, char *dirName, int nameSize) {
                                                  | QFileDialog::DontResolveSymlinks);   
    
    if (!dir.isNull()) {
-      ::qstrncpy(dirName, dir.toAscii().data(), nameSize);
+      QByteArray qba = dir.toAscii();
+      ::qstrncpy(dirName, qba.data(), nameSize);
       return dirName;
    }
    return NULL;
@@ -274,13 +277,14 @@ void argCallback(const char * /*func*/, const char *arg, int idx, void *user) {
 }
 
 void UnemulatedDialog::do_ok() {
-   dword retval = 0;
-   char *value = ue_return->text().toAscii().data();
+   unsigned int retval = 0;
+   QByteArray _v = ue_return->text().toAscii();
+   char *value = _v.data();
    retval = strtoul(value, NULL, 0);
    eax = retval;
 
-   dword stackfree = ue_args->value();
-   dword callType = 0xFFFFFFFF;
+   unsigned int stackfree = ue_args->value();
+   unsigned int callType = 0xFFFFFFFF;
    if (is_cdecl->isChecked()) {
       callType = CALL_CDECL;
    }
@@ -298,7 +302,7 @@ void UnemulatedDialog::do_ok() {
       accept();
       if (doLogLib) {
          char *p = strchr(functionCall, '(') + 1;
-         for (dword i = 0; i < stackfree; i++) {
+         for (unsigned int i = 0; i < stackfree; i++) {
             char *n = strchr(p, 1);
             if (n) {
                p = n;
@@ -435,7 +439,7 @@ UnemulatedDialog::UnemulatedDialog(QWidget *parent, const char *name, unsigned i
 /*
  * This function is used for all unemulated API functions
  */
-void handleUnemulatedFunction(dword addr, const char *name) {
+void handleUnemulatedFunction(unsigned int addr, const char *name) {
    UnemulatedDialog ud(getWidgetParent(), name, addr);
    ud.exec();
    shouldBreak = 1;
@@ -533,13 +537,13 @@ MemConfigDialog::MemConfigDialog(QWidget *parent) : QDialog(parent) {
    char buf[16];
    segment_t *s = get_segm_by_name(".stack");
    segment_t *h = get_segm_by_name(".heap");
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)s->endEA);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (unsigned int)s->endEA);
    stack_top->setText(buf);
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)(s->endEA - s->startEA));
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (unsigned int)(s->endEA - s->startEA));
    stack_size->setText(buf);
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)h->startEA);
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (unsigned int)h->startEA);
    heap_base->setText(buf);
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)(h->endEA - h->startEA));
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (unsigned int)(h->endEA - h->startEA));
    heap_size->setText(buf);
 
    QFormLayout *fl = new QFormLayout();
@@ -597,15 +601,16 @@ char *getOpenFileName(const char *title, char *fileName, int nameLen, const char
    QString f = QFileDialog::getOpenFileName(getWidgetParent(), title,
                                             initDir, filter);
    if (!f.isNull()) {
-      ::qstrncpy(fileName, f.toAscii().data(), nameLen);
+      QByteArray qba = f.toAscii();
+      ::qstrncpy(fileName, qba.data(), nameLen);
       return fileName;
    }
    return NULL;
 }
 
-static void setMemValues(dword addr, char *v, dword sz) {
+static void setMemValues(unsigned int addr, const char *v, unsigned int sz) {
    char *ptr;
-   while ((ptr = strchr(v, ' ')) != NULL) {
+   while ((ptr = (char*)strchr(v, ' ')) != NULL) {
       *ptr++ = 0;
       if (strlen(v)) {
          writeMem(addr, strtoul(v, NULL, 16), sz);
@@ -619,9 +624,11 @@ static void setMemValues(dword addr, char *v, dword sz) {
 }
 
 void SetMemoryDialog::do_ok() {
-   char *ea = mem_start->text().toAscii().data();
-   dword addr = strtoul(ea, 0, 0);
-   char *v = mem_values->text().toAscii().data();
+   QByteArray a = mem_start->text().toAscii();
+   const char *ea = a.data();
+   unsigned int addr = strtoul(ea, 0, 0);
+   QByteArray t = mem_values->text().toAscii();
+   const char *v = t.data();
 
    if (type_file->isChecked()) {
       memLoadFile(addr);
@@ -636,7 +643,9 @@ void SetMemoryDialog::do_ok() {
       setMemValues(addr, v, SIZE_DWORD);
    }
    else if (type_ascii->isChecked() || type_asciiz->isChecked()) {
-      while (*v) writeMem(addr++, *v++, SIZE_BYTE);
+      while (*v) {
+         writeMem(addr++, *v++, SIZE_BYTE);
+      }
       if (type_asciiz->isChecked()) writeMem(addr, 0, SIZE_BYTE);
    }
    accept();
@@ -689,7 +698,7 @@ SetMemoryDialog::SetMemoryDialog(QWidget *parent) : QDialog(parent) {
    groupBox->setLayout(gl);
    
    char buf[32];
-   ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)get_screen_ea());
+   ::qsnprintf(buf, sizeof(buf), "0x%08X", (unsigned int)get_screen_ea());
    mem_start = new QLineEdit(buf);
    mem_start->setValidator(&aiv);
    mem_values = new QLineEdit(this);
@@ -743,7 +752,8 @@ bool getMmapBlockData(unsigned int *base, unsigned int *size) {
    char msg_buf[128];
    MmapDialog mm(getWidgetParent());
    if (mm.exec()) {
-      char *ms = mm.mmap_size->text().toAscii().data();
+      QByteArray _ms = mm.mmap_size->text().toAscii(); 
+      char *ms = _ms.data();
       char *endptr;
       *size = strtoul(ms, &endptr, 0);
       if (*endptr) {
@@ -751,7 +761,8 @@ bool getMmapBlockData(unsigned int *base, unsigned int *size) {
          showErrorMessage(msg_buf);
          return false;
       }
-      char *mb = mm.mmap_base->text().toAscii().data();
+      QByteArray _mb = mm.mmap_base->text().toAscii();
+      char *mb = _mb.data();
       *base = strtoul(mb, &endptr, 0);
       if (*endptr) {
          ::qsnprintf(msg_buf, sizeof(msg_buf), "Invalid mmap base: %s, cancelling mmap allocation", mb);
@@ -819,7 +830,7 @@ MmapDialog::MmapDialog(QWidget *parent) : QDialog(parent) {
    mmap_base->setFocus();
 }
 
-static QString &formatReg(QString &qs, const char *format, dword val) {
+static QString &formatReg(QString &qs, const char *format, unsigned int val) {
    char buf[32];
    ::qsnprintf(buf, sizeof(buf), format, val);
    qs = buf;
@@ -1060,6 +1071,11 @@ void X86Dialog::logLibraryCalls() {
    setLogLibrary(!logLibrary()); 
 }
 
+void X86Dialog::breakOnExceptions() {
+   emulateBreakOnExceptionsAction->setChecked(!::breakOnExceptions);
+   setBreakOnExceptions(!::breakOnExceptions); 
+}
+
 void X86Dialog::setImportAddressSavePoint() {
    tagImportAddressSavePoint();
 }
@@ -1169,6 +1185,9 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    emulateLogLibraryAction = new QAction("Log library calls", this);
    emulateLogLibraryAction->setCheckable(true);
    emulateLogLibraryAction->setChecked(doLogLib);
+   emulateBreakOnExceptionsAction = new QAction("Break on exceptions", this);
+   emulateBreakOnExceptionsAction->setCheckable(true);
+   emulateBreakOnExceptionsAction->setChecked(::breakOnExceptions);
    QAction *emulateWindowsThrow_exceptionMemory_accessAction = new QAction("Memory access", this);
    QAction *emulateWindowsThrow_exceptionBreakpointAction = new QAction("Breakpoint", this);
    QAction *emulateWindowsThrow_exceptionDivide_by_zeroAction = new QAction("Divide by zero", this);
@@ -1341,6 +1360,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    Emulate->addAction(emulateTrack_fetched_bytesAction);
    Emulate->addAction(emulateTrace_executionAction);
    Emulate->addAction(emulateLogLibraryAction);
+   Emulate->addAction(emulateBreakOnExceptionsAction);
    popupMenu_13->addAction(emulateWindowsAuto_hookAction);
    popupMenu_13->addAction(emulateWindowsLoadLibraryAction);
    popupMenu_13->addAction(emulateWindowsSet_import_addr_save_pointAction);
@@ -1401,6 +1421,7 @@ X86Dialog::X86Dialog(QWidget *parent) : QMainWindow(parent, X86_WINDOW_FLAGS) {
    connect(emulateTrack_fetched_bytesAction, SIGNAL(triggered()), this, SLOT(trackExec()));
    connect(emulateTrace_executionAction, SIGNAL(triggered()), this, SLOT(traceExec()));
    connect(emulateLogLibraryAction, SIGNAL(triggered()), this, SLOT(logLibraryCalls()));
+   connect(emulateBreakOnExceptionsAction, SIGNAL(triggered()), this, SLOT(breakOnExceptions()));
 
    setWindowTitle("x86 Emulator");
 

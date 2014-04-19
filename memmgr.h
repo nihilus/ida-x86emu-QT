@@ -71,14 +71,14 @@
 #define MM_MAP_FIXED LINUX_MAP_FIXED
 #define MM_MAP_ANONYMOUS LINUX_MAP_ANONYMOUS
 
-void createNewSegment(const char *name, dword base, dword size);
+void createNewSegment(const char *name, unsigned int base, unsigned int size);
 
 class MemMgr {
 public:
-   static void reserve(dword addr, dword size);
-   static dword mmap(dword addr, dword size, dword prot, dword flags, const char *segName = NULL);
-   static dword mapFixed(dword addr, dword size, dword prot, dword flags, const char *segName = NULL);
-   static dword munmap(dword addr, dword size);
+   static void reserve(unsigned int addr, unsigned int size);
+   static unsigned int mmap(unsigned int addr, unsigned int size, unsigned int prot, unsigned int flags, const char *segName = NULL);
+   static unsigned int mapFixed(unsigned int addr, unsigned int size, unsigned int prot, unsigned int flags, const char *segName = NULL);
+   static unsigned int munmap(unsigned int addr, unsigned int size);
 };
 
 #endif

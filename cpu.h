@@ -25,19 +25,19 @@
 #define CPU_VERSION VERSION(1)
 
 typedef struct _DescriptorTableReg_t {
-   dword base;
-   word limit;
+   unsigned int base;
+   unsigned short limit;
 } DescriptorTableReg;
 
 struct Registers {
-   dword debug_regs[8];
-   dword general[8];
-   dword initial_eip;
-   dword eip;
-   dword eflags;
-   dword control[5];
-   dword segBase[6];   //cached segment base addresses
-   word segReg[6];
+   unsigned int debug_regs[8];
+   unsigned int general[8];
+   unsigned int initial_eip;
+   unsigned int eip;
+   unsigned int eflags;
+   unsigned int control[5];
+   unsigned int segBase[6];   //cached segment base addresses
+   unsigned short segReg[6];
    DescriptorTableReg gdtr;
    DescriptorTableReg idtr;
 };
@@ -83,19 +83,20 @@ extern SSE2Registers sse2;
 extern ll_union tsc;
 
 //masks to clear out bytes appropriate to the sizes above
-extern dword SIZE_MASKS[5];
+extern unsigned int SIZE_MASKS[5];
 
 //masks to clear out bytes appropriate to the sizes above
-extern dword SIGN_BITS[5];
+extern unsigned int SIGN_BITS[5];
 
 //masks to clear out bytes appropriate to the sizes above
-extern qword CARRY_BITS[5];
+extern unsigned long long CARRY_BITS[5];
 
-extern byte BITS[5];
+extern unsigned char BITS[5];
 
-extern dword importSavePoint;
+extern unsigned int importSavePoint;
 
-extern dword shouldBreak;
+extern unsigned int shouldBreak;
+extern bool breakOnExceptions;
 
 typedef struct _IntrRecord_t {
    bool hasError;
@@ -103,18 +104,18 @@ typedef struct _IntrRecord_t {
 } IntrRecord;
 
 typedef struct _AddrInfo_t {
-   dword addr;
-   byte type;
-   byte modrm;
+   unsigned int addr;
+   unsigned char type;
+   unsigned char modrm;
 } AddrInfo;
 
 //struct to describe an instruction being decoded
 typedef struct _inst {
    AddrInfo source;
    AddrInfo dest;
-   dword opsize;  //operand size for this instruction
-   dword prefix;  //any prefix flags
-   byte opcode;   //opcode, first or second byte (if first == 0x0F)
+   unsigned int opsize;  //operand size for this instruction
+   unsigned int prefix;  //any prefix flags
+   unsigned char opcode;   //opcode, first or second unsigned char (if first == 0x0F)
 } inst;
 
 // Status codes returned by the database blob reading routine
@@ -133,19 +134,19 @@ void enableSEH();
 
 void resetCpu();
 
-void push(dword val, byte size);
-dword pop(byte size);
-byte readByte(dword addr);
-void writeByte(dword addr, byte val);
-dword readDword(dword addr);
-void writeDword(dword addr, dword val);
-void writeMem(dword addr, dword val, byte size);
-dword readMem(dword addr, byte size);
+void push(unsigned int val, unsigned char size);
+unsigned int pop(unsigned char size);
+unsigned char readByte(unsigned int addr);
+void writeByte(unsigned int addr, unsigned char val);
+unsigned int readDword(unsigned int addr);
+void writeDword(unsigned int addr, unsigned int val);
+void writeMem(unsigned int addr, unsigned int val, unsigned char size);
+unsigned int readMem(unsigned int addr, unsigned char size);
 
 int executeInstruction();
 void doInterruptReturn();
 
-void initGDTR(dword gdtBase, dword gdtLimit);
+void initGDTR(unsigned int gdtBase, unsigned int gdtLimit);
 unsigned int getGdtDescBase(unsigned int desc);
 unsigned int getGdtDescLimit(unsigned int desc);
 void setGdtDesc(unsigned int desc, unsigned int base, unsigned int limit);

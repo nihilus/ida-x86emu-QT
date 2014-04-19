@@ -50,7 +50,7 @@
 static bool haveTEB = false;
 static sel_t tebSel = 0;
 
-void createNewSegment(const char *name, dword base, dword size) {
+void createNewSegment(const char *name, unsigned int base, unsigned int size) {
 //msg("createNewSegment: %s\n", name);
    //create the new segment
    segment_t s;
@@ -123,11 +123,11 @@ MemMgr::MemMgr() {
 }
 */
 
-void MemMgr::reserve(dword addr, dword size) {
+void MemMgr::reserve(unsigned int addr, unsigned int size) {
    segment_t *s = getseg(addr);
    if (s) {
       size = (size + 0xFFF) & 0xFFFFF000;
-      dword end = addr + size;
+      unsigned int end = addr + size;
       if (end > s->endEA) {
          segment_t *n = next_seg(addr);
          if (n) {
@@ -148,11 +148,11 @@ void MemMgr::reserve(dword addr, dword size) {
    }
 }
 
-dword MemMgr::mapFixed(dword addr, dword size, dword /*prot*/, dword flags, const char *name) {
+unsigned int MemMgr::mapFixed(unsigned int addr, unsigned int size, unsigned int /*prot*/, unsigned int flags, const char *name) {
    if (addr == 0 || (flags & MM_MAP_FIXED) == 0) {
-      return (dword)BADADDR;
+      return (unsigned int)BADADDR;
    }
-   dword end = addr + size;
+   unsigned int end = addr + size;
    segment_t *s = getseg(addr);
    segment_t *n = next_seg(addr);
 
@@ -191,7 +191,7 @@ dword MemMgr::mapFixed(dword addr, dword size, dword /*prot*/, dword flags, cons
       }
    }
    
-   dword suffix = (addr >> 12) & 0xFFFFF;
+   unsigned int suffix = (addr >> 12) & 0xFFFFF;
    if (name == NULL) {
       char segName[64];
       ::qsnprintf(segName, sizeof(segName), "mmap_%05x", suffix);
@@ -203,27 +203,27 @@ dword MemMgr::mapFixed(dword addr, dword size, dword /*prot*/, dword flags, cons
    return addr;
 }
 
-dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *name) {
+unsigned int MemMgr::mmap(unsigned int addr, unsigned int size, unsigned int prot, unsigned int flags, const char *name) {
    if (flags & MM_MAP_FIXED) {
       return mapFixed(addr, size, prot, flags, name);
    }
    if (addr == 0) {
-      addr = (dword)kernel_node.altval(OS_MIN_ADDR);
+      addr = (unsigned int)kernel_node.altval(OS_MIN_ADDR);
 //      addr = inf.minEA;
    }
    while (1) {
       segment_t *s = getseg(addr);
       if (s == NULL) {            
          segment_t *n = next_seg(addr);
-         dword avail = 0;
+         unsigned int avail = 0;
          if (n) {
-            avail = (dword)n->startEA - addr;
+            avail = (unsigned int)n->startEA - addr;
          }
          else {
             avail = 0 - addr;
          }
          if (avail >= size) {
-            dword suffix = (addr >> 12) & 0xFFFFF;
+            unsigned int suffix = (addr >> 12) & 0xFFFFF;
             if (name == NULL) {
                char segName[64];
                ::qsnprintf(segName, sizeof(segName), "mmap_%05x", suffix);
@@ -235,7 +235,7 @@ dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *
             return addr;
          }
          if (n == NULL) {
-            return (dword)BADADDR;
+            return (unsigned int)BADADDR;
          }
          s = n;
       }
@@ -243,10 +243,10 @@ dword MemMgr::mmap(dword addr, dword size, dword prot, dword flags, const char *
    }
 }
 
-dword MemMgr::munmap(dword addr, dword size) {
+unsigned int MemMgr::munmap(unsigned int addr, unsigned int size) {
    segment_t *s = getseg(addr);
    size = (size + 0xFFF) & 0xFFFFF000;
-   dword end = addr + size;
+   unsigned int end = addr + size;
    if (s) {
       if (end >= s->endEA) {
          del_segm(addr, SEGDEL_KEEP);

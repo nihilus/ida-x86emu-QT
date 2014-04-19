@@ -76,6 +76,7 @@ public slots:
    void trackExec();
    void traceExec();
    void logLibraryCalls();
+   void breakOnExceptions();
    void setImportAddressSavePoint();
    void setBreak();
    void clearBreak();
@@ -110,6 +111,7 @@ private:
    QAction *emulateTrack_fetched_bytesAction;
    QAction *emulateTrace_executionAction;
    QAction *emulateLogLibraryAction;
+   QAction *emulateBreakOnExceptionsAction;
    QPushButton *BREAK;
 };
 

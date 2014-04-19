@@ -25,7 +25,7 @@ static int seh_enable = 0;
 static WIN_CONTEXT ctx;
 
 typedef struct _VehNode {
-   dword handler;
+   unsigned int handler;
    struct _VehNode *next;
 } VehNode;
 
@@ -39,7 +39,7 @@ int usingSEH() {
    return seh_enable;
 }
 
-VehNode *findVehHandler(dword handler) {
+VehNode *findVehHandler(unsigned int handler) {
    for (VehNode *h = vehList; h; h = h->next) {
       if (h->handler == handler) {
          return h;
@@ -56,7 +56,7 @@ void saveSEHState(Buffer &b) {
 }
 
 void loadSEHState(Buffer &b) {
-   dword dummy;
+   unsigned int dummy;
    b.read(&dummy, sizeof(dummy));
    b.read(&seh_enable, sizeof(seh_enable));
    b.read(&ctx, sizeof(ctx));
@@ -64,12 +64,12 @@ void loadSEHState(Buffer &b) {
 
 void saveVEHState(Buffer &b) {
    for (VehNode *v = vehList; v; v = v->next) {
-      b.write(&v->handler, sizeof(dword));
+      b.write(&v->handler, sizeof(unsigned int));
    }
 }
 
 void loadVEHState(Buffer &b) {
-   dword dummy;
+   unsigned int dummy;
    while (b.read(&dummy, sizeof(dummy)) == 0) {
       addVectoredExceptionHandler(0, dummy);
    }
@@ -96,46 +96,46 @@ void initContext() {
 }
 
 void popContext() {
-   byte *ptr = (byte*) &ctx;
-   dword addr, i;
-   dword ctx_size = (sizeof(WIN_CONTEXT) + 3) & ~3;  //round up to next dword
+   unsigned char *ptr = (unsigned char*) &ctx;
+   unsigned int addr, i;
+   unsigned int ctx_size = (sizeof(WIN_CONTEXT) + 3) & ~3;  //round up to next unsigned int
    addr = esp;
    for (i = 0; i < sizeof(WIN_CONTEXT); i++) {
-      *ptr++ = (byte) readMem(addr++, SIZE_BYTE);
+      *ptr++ = (unsigned char) readMem(addr++, SIZE_BYTE);
    }
    esp += ctx_size;
    contextToCpu();
 }
 
-void getContextToMem(dword addr) {
-//   byte *ptr = (byte*) &ctx;
+void getContextToMem(unsigned int addr) {
+//   unsigned char *ptr = (unsigned char*) &ctx;
    cpuToContext();
    copyContextToMem(&ctx, addr);
 }
 
-dword pushContext() {
-   dword ctx_size = (sizeof(WIN_CONTEXT) + 3) & ~3;  //round up to next dword
-   dword addr = esp - ctx_size;
+unsigned int pushContext() {
+   unsigned int ctx_size = (sizeof(WIN_CONTEXT) + 3) & ~3;  //round up to next unsigned int
+   unsigned int addr = esp - ctx_size;
    getContextToMem(addr);
    esp = addr;
    return esp;
 }
 
 void popExceptionRecord(EXCEPTION_RECORD *rec) {
-   byte *ptr = (byte*) &rec;
-   dword addr, i;
-   dword rec_size = (sizeof(EXCEPTION_RECORD) + 3) & ~3;  //round up to next dword
+   unsigned char *ptr = (unsigned char*) &rec;
+   unsigned int addr, i;
+   unsigned int rec_size = (sizeof(EXCEPTION_RECORD) + 3) & ~3;  //round up to next unsigned int
    addr = esp;
    for (i = 0; i < sizeof(EXCEPTION_RECORD); i++) {
-      *ptr++ = (byte) readMem(addr++, SIZE_BYTE);
+      *ptr++ = (unsigned char) readMem(addr++, SIZE_BYTE);
    }
    esp += rec_size;
 }
 
-dword pushExceptionRecord(EXCEPTION_RECORD *rec) {
-   byte *ptr = (byte*) rec;
-   dword addr, i;
-   dword rec_size = (sizeof(EXCEPTION_RECORD) + 3) & ~3;  //round up to next dword
+unsigned int pushExceptionRecord(EXCEPTION_RECORD *rec) {
+   unsigned char *ptr = (unsigned char*) rec;
+   unsigned int addr, i;
+   unsigned int rec_size = (sizeof(EXCEPTION_RECORD) + 3) & ~3;  //round up to next unsigned int
    addr = esp -= rec_size;
    for (i = 0; i < sizeof(EXCEPTION_RECORD); i++) {
       writeMem(addr++, *ptr++, SIZE_BYTE);
@@ -144,14 +144,14 @@ dword pushExceptionRecord(EXCEPTION_RECORD *rec) {
 }
 
 void doSehException(EXCEPTION_RECORD *rec) {
-   dword err_ptr = readMem(fsBase, SIZE_DWORD);
-   dword handler = readMem(err_ptr + 4, SIZE_DWORD);  //err->handler
+   unsigned int err_ptr = readMem(fsBase, SIZE_DWORD);
+   unsigned int handler = readMem(err_ptr + 4, SIZE_DWORD);  //err->handler
    
    //do sanity checks on handler here?
    
    cpuToContext();
-   dword ctx_ptr = pushContext();
-   dword rec_ptr = pushExceptionRecord(rec);
+   unsigned int ctx_ptr = pushContext();
+   unsigned int rec_ptr = pushExceptionRecord(rec);
    
    push(ctx_ptr, SIZE_DWORD);
    push(err_ptr, SIZE_DWORD);       //err_ptr == fsBase??
@@ -162,12 +162,12 @@ void doSehException(EXCEPTION_RECORD *rec) {
    cpu.eip = handler;
 }
 
-static dword currentVehHandler;
+static unsigned int currentVehHandler;
 
-void doVehException(EXCEPTION_RECORD *rec, dword handler) {      
+void doVehException(EXCEPTION_RECORD *rec, unsigned int handler) {      
    cpuToContext();
-   dword ctx_ptr = pushContext();
-   dword rec_ptr = pushExceptionRecord(rec);
+   unsigned int ctx_ptr = pushContext();
+   unsigned int rec_ptr = pushExceptionRecord(rec);
    
    push(ctx_ptr, SIZE_DWORD);
    push(rec_ptr, SIZE_DWORD);
@@ -235,7 +235,7 @@ void vehReturn() {
    
    //need to check eax here to see if exception was handled
    //or if it needs to be kicked up to next SEH handler
-   dword res = eax;
+   unsigned int res = eax;
    
    esp += 3 * SIZE_DWORD;  //clear off exception pointers
    
@@ -261,7 +261,7 @@ void vehReturn() {
    }
 }
 
-void generateException(dword code) {
+void generateException(unsigned int code) {
    if (seh_enable) {
       EXCEPTION_RECORD rec;
       rec.exceptionCode = code;
@@ -298,7 +298,7 @@ void enableSEH() {
    seh_enable = 1;
 }
 
-void sehBegin(dword interrupt_number) {
+void sehBegin(unsigned int interrupt_number) {
    msg("Initiating SEH processing of INT %d\n", interrupt_number);
    switch (interrupt_number) {
    case 0:
@@ -313,10 +313,13 @@ void sehBegin(dword interrupt_number) {
    case 6:
       generateException(UNDEFINED_OPCODE_EXCEPTION);
       break;   
+   case 14:
+      generateException(MEM_ACCESS);
+      break;   
    }
 }
 
-void addVectoredExceptionHandler(bool first, dword handler) {
+void addVectoredExceptionHandler(bool first, unsigned int handler) {
    VehNode *n = (VehNode*)malloc(sizeof(VehNode));
    n->handler = handler;
    if (first) {
@@ -336,7 +339,7 @@ void addVectoredExceptionHandler(bool first, dword handler) {
    }
 }
 
-void removeVectoredExceptionHandler(dword handler) {
+void removeVectoredExceptionHandler(unsigned int handler) {
    VehNode *p = NULL;
    for (VehNode *h = vehList; h->next; h = h->next) {
       if (h->handler == handler) {

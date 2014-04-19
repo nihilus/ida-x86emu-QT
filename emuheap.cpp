@@ -79,8 +79,8 @@ EmuHeap::EmuHeap(unsigned int baseAddr, unsigned int currSize, unsigned int maxS
 EmuHeap::EmuHeap(const char *name, unsigned int maxSize) {
    h = get_segm_by_name(name);
    head = NULL;
-   base = (dword)h->startEA;
-   size = (dword)h->endEA - base;
+   base = (unsigned int)h->startEA;
+   size = (unsigned int)h->endEA - base;
    max = maxSize + base;
    nextHeap = NULL;
    if (primaryHeap == NULL) {

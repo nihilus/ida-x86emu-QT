@@ -82,16 +82,16 @@ void initContext(WIN_CONTEXT *ctx) {
    memset(ctx, 0, sizeof(WIN_CONTEXT));
 }
 
-void copyContextToMem(WIN_CONTEXT *ctx, dword addr) {
-   byte *ptr = (byte*) ctx;
-   for (dword i = 0; i < sizeof(WIN_CONTEXT); i++) {
+void copyContextToMem(WIN_CONTEXT *ctx, unsigned int addr) {
+   unsigned char *ptr = (unsigned char*) ctx;
+   for (unsigned int i = 0; i < sizeof(WIN_CONTEXT); i++) {
       writeMem(addr++, *ptr++, SIZE_BYTE);
    }
 }
 /*
-dword pushContext() {
-   dword ctx_size = (sizeof(CONTEXT) + 3) & ~3;  //round up to next dword
-   dword addr = esp - ctx_size;
+unsigned int pushContext() {
+   unsigned int ctx_size = (sizeof(CONTEXT) + 3) & ~3;  //round up to next unsigned int
+   unsigned int addr = esp - ctx_size;
    copyContextToMem(addr);
    esp = addr;
    return esp;

@@ -34,24 +34,24 @@
 #endif
 
 //masks to clear out bytes appropriate to the sizes above
-dword SIZE_MASKS[] = {0, 0x000000FF, 0x0000FFFF, 0, 0xFFFFFFFF};
+unsigned int SIZE_MASKS[] = {0, 0x000000FF, 0x0000FFFF, 0, 0xFFFFFFFF};
 
 //masks to limit bit rotation amount in rotation instructions
-dword ROTATE_SIZE_MASKS[] = {0, 7, 0xF, 0, 0x1F };
+unsigned int ROTATE_SIZE_MASKS[] = {0, 7, 0xF, 0, 0x1F };
 
 //masks to clear out bytes appropriate to the sizes above
-dword SIGN_BITS[] = {0, 0x00000080, 0x00008000, 0, 0x80000000};
+unsigned int SIGN_BITS[] = {0, 0x00000080, 0x00008000, 0, 0x80000000};
 
 //masks to clear out bytes appropriate to the sizes above
 #if defined(CYGWIN) || !defined(WIN32)
-qword CARRY_BITS[] = {0, 0x00000100, 0x00010000, 0, 0x100000000ll};
+unsigned long long CARRY_BITS[] = {0, 0x00000100, 0x00010000, 0, 0x100000000ll};
 #else
-qword CARRY_BITS[] = {0, 0x00000100, 0x00010000, 0, 0x100000000};
+unsigned long long CARRY_BITS[] = {0, 0x00000100, 0x00010000, 0, 0x100000000};
 #endif
 
-byte BITS[] = {0, 8, 16, 0, 32};
+unsigned char BITS[] = {0, 8, 16, 0, 32};
 
-const uchar parityValues[256] = {
+const unsigned char parityValues[256] = {
    1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
    0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
@@ -71,7 +71,7 @@ const uchar parityValues[256] = {
 };
 
 //Mask for allowable setting of CPU flags
-dword current_priv_flags = RING_3_FLAGS;
+unsigned int current_priv_flags = RING_3_FLAGS;
 
 //The cpu
 Registers cpu;
@@ -84,31 +84,33 @@ SSE2Registers sse2;
 
 ll_union tsc; //timestamp counter
 
-static uint segmentBase;   //base address for next memory operation
-static uint segmentReg;   //base address for next memory operation
+static unsigned int segmentBase;   //base address for next memory operation
+static unsigned int segmentReg;   //base address for next memory operation
 
-dword seg3_map[] = {3, 0, 1, 2, 4, 5, 0, 0};
+unsigned int seg3_map[] = {3, 0, 1, 2, 4, 5, 0, 0};
 
 //Need to make this user configurable.  For now it is fixed.
-static dword maxStackSize = 0x100000;
+static unsigned int maxStackSize = 0x100000;
 
-static dword instStart;
-static dword fpuStart;
+static unsigned int instStart;
+static unsigned int fpuStart;
 //struct to describe an instruction being decoded
 static AddrInfo source;
 static AddrInfo dest;
-static dword opsize;  //operand size for this instruction
-static dword prefix;  //any prefix flags
-static byte opcode;   //opcode, first or second byte (if first == 0x0F)
+static unsigned int opsize;  //operand size for this instruction
+static unsigned int prefix;  //any prefix flags
+static unsigned char opcode;   //opcode, first or second unsigned char (if first == 0x0F)
 
-dword importSavePoint = 0xFFFFFFFF;
+unsigned int importSavePoint = 0xFFFFFFFF;
 static bool makeImport = false;
 
 IntrRecord *intrList = NULL;
 
 //flag to tell CPU users that they should probably break because something
 //strange has happened
-dword shouldBreak = 1;
+unsigned int shouldBreak = 1;
+
+bool breakOnExceptions = true;
 
 int doEscape();
 
@@ -262,7 +264,7 @@ void fpuStoreEnv(unsigned int addr) {
    addr += 4;
    writeMem(addr, fpu.lastIP, SIZE_DWORD);
    addr += 4;
-   dword opseg = fpu.opcode;
+   unsigned int opseg = fpu.opcode;
    writeMem(addr, fpu.lastIPseg | (opseg << 16), SIZE_DWORD);
    addr += 4;
    writeMem(addr, fpu.lastDataPointer, SIZE_DWORD);
@@ -270,8 +272,8 @@ void fpuStoreEnv(unsigned int addr) {
    writeMem(addr, fpu.lastDataSeg, SIZE_DWORD);
 }
 
-void setInterruptGate(dword base, dword interrupt_number,
-                      dword segment, dword handler) {
+void setInterruptGate(unsigned int base, unsigned int interrupt_number,
+                      unsigned int segment, unsigned int handler) {
    segmentBase = dsBase;
    segmentReg = _ds;
    interrupt_number *= 8;
@@ -281,7 +283,7 @@ void setInterruptGate(dword base, dword interrupt_number,
    writeMem(base + interrupt_number + 4, 0xEE00, SIZE_WORD);
 }
 
-void initIDTR(dword idtBase, dword idtLimit) {
+void initIDTR(unsigned int idtBase, unsigned int idtLimit) {
    cpu.idtr.base = idtBase;
    cpu.idtr.limit = idtLimit;
    if (usingSEH()) {
@@ -289,13 +291,14 @@ void initIDTR(dword idtBase, dword idtLimit) {
       setInterruptGate(cpu.idtr.base, 1, _cs, SEH_MAGIC);
       setInterruptGate(cpu.idtr.base, 3, _cs, SEH_MAGIC);
       setInterruptGate(cpu.idtr.base, 6, _cs, SEH_MAGIC);
+      setInterruptGate(cpu.idtr.base, 14, _cs, SEH_MAGIC);
    }
    else {
       setInterruptGate(cpu.idtr.base, 0x80, _cs, INTx80_MAGIC);
    }
 }
 
-void initGDTR(dword gdtBase, dword gdtLimit) {
+void initGDTR(unsigned int gdtBase, unsigned int gdtLimit) {
    cpu.gdtr.base = gdtBase;
    cpu.gdtr.limit = gdtLimit;
 }
@@ -347,7 +350,7 @@ void setGdtDesc(unsigned int desc, unsigned int base, unsigned int limit) {
 
 int saveState(netnode &f) {
    unsigned char *buf = NULL;
-   dword sz;
+   unsigned int sz;
 //   Buffer b(CPU_VERSION);
    Buffer b;
 //   int personality = f.altval(HEAP_PERSONALITY);
@@ -391,7 +394,7 @@ int saveState(netnode &f) {
             // Convert the output blob object into a buffer and
             // store it in the database node.
             //
-            dword hsz = hb.get_wlen();
+            unsigned int hsz = hb.get_wlen();
          //   msg("x86emu: writing blob of size %d.\n", sz);
             hbuf = hb.get_buf();
             hn.setblob(hbuf, hsz, 0, 'B');
@@ -408,10 +411,10 @@ int saveState(netnode &f) {
    saveSEHState(b);
 
    ThreadNode *tn;
-   dword threadCount = 0;
+   unsigned int threadCount = 0;
    for (tn = threadList; tn; tn = tn->next) threadCount++;
 
-   dword threadMagic = THREAD_MAGIC;
+   unsigned int threadMagic = THREAD_MAGIC;
    b.write((char*)&threadMagic, sizeof(threadMagic));
    b.write((char*)&activeThread->handle, sizeof(activeThread->handle));
    b.write((char*)&threadCount, sizeof(threadCount));
@@ -534,14 +537,14 @@ int loadState(netnode &f) {
 
    //now load additional thread data and set active thread
 
-   dword threadMagic, threadCount, active;
+   unsigned int threadMagic, threadCount, active;
    b.read((char*)&threadMagic, sizeof(threadMagic));
    if (threadMagic == THREAD_MAGIC) {
       b.read((char*)&active, sizeof(active));
       b.read((char*)&threadCount, sizeof(threadCount));
       //now load thread list
       ThreadNode *tn = NULL;
-      for (dword i = 0; i < threadCount; i++) {
+      for (unsigned int i = 0; i < threadCount; i++) {
          if (i == 0) {
             threadList = new ThreadNode(b, active);
             tn = threadList;
@@ -599,41 +602,41 @@ void resetCpu() {
    //need to clear the heap in here as well then allocate a new idt
 }
 
-void initProgram(unsigned int entry, dword idtBase, dword idtLimit) {
+void initProgram(unsigned int entry, unsigned int idtBase, unsigned int idtLimit) {
    cpu.eip = entry;
    initIDTR(idtBase, idtLimit);
 }
 
 //sign extension functions
-//byte->word
-word sebw(byte val) {
+//unsigned char->unsigned short
+unsigned short sebw(unsigned char val) {
    short result = (char)val;
-   return (word) result;
+   return (unsigned short) result;
 }
 
-//word->dword
-dword sewd(word val) {
+//unsigned short->unsigned int
+unsigned int sewd(unsigned short val) {
    int result = (short)val;
-   return (dword) result;
+   return (unsigned int) result;
 }
 
-//byte->dword
-dword sebd(byte val) {
+//unsigned char->unsigned int
+unsigned int sebd(unsigned char val) {
    int result = (char)val;
-   return (dword) result;
+   return (unsigned int) result;
 }
 
-//dword->qword
-qword sedq(dword val) {
-   quad result = (int)val;
-   return (qword) result;
+//unsigned int->unsigned long long
+unsigned long long sedq(unsigned int val) {
+   unsigned long long result = (int)val;
+   return result;
 }
 
 //The stack is the only segment that can grow automatically to a
 //predetermined maximum size, so we check here to see if a reference
 //is being made to a location outside the currently allocated range
 //of the stack segment and adjust the stack size accordingly.
-bool checkStackRange(dword addr) {
+bool checkStackRange(unsigned int addr) {
    segment_t *s = getseg(addr);
    if (s == NULL) {
       //addr may point outside any existing segment
@@ -644,8 +647,8 @@ bool checkStackRange(dword addr) {
          //no stack segment exists! Nothing to grow
          return false;
       }
-      dword pageBase = addr & ~0xFFF; //truncate to 4k boundary
-      dword minStack = (dword)stack->endEA - maxStackSize;
+      unsigned int pageBase = addr & ~0xFFF; //truncate to 4k boundary
+      unsigned int minStack = (unsigned int)stack->endEA - maxStackSize;
       if (pageBase < stack->endEA && pageBase >= minStack) {
          set_segm_start(stack->startEA, pageBase, 0);
       }
@@ -654,27 +657,30 @@ bool checkStackRange(dword addr) {
    return s != NULL;
 }
 
-//return a byte
-byte readByte(dword addr) {
+//return a unsigned char
+unsigned char readByte(unsigned int addr) {
+   if (getseg(addr) == NULL) {
+      throw 14;  //page fault exception ??
+   }
    return get_byte(addr);
 }
 
 //don't interface to IDA's get_word/long routines so
 //that we can detect stack usage in readByte
-word readWord(dword addr) {
-   word result = readByte(addr + 1);
+unsigned short readWord(unsigned int addr) {
+   unsigned short result = readByte(addr + 1);
    result <<= 8;
    return result | readByte(addr);
 }
 
-dword readDword(dword addr) {
-   dword result = readWord(addr + 2);
+unsigned int readDword(unsigned int addr) {
+   unsigned int result = readWord(addr + 2);
    result <<= 16;
    return result | readWord(addr);
 }
 
 //all reads from memory should be through this function
-dword readMem(dword addr, byte size) {
+unsigned int readMem(unsigned int addr, unsigned char size) {
    int result = 0;
    addr += segmentBase;
    switch (size) {
@@ -691,17 +697,21 @@ dword readMem(dword addr, byte size) {
    return result;
 }
 
-dword readBuffer(dword addr, void *buf, dword nbytes) {
+unsigned int readBuffer(unsigned int addr, void *buf, unsigned int nbytes) {
 //   int result = 0;
    addr += segmentBase;
-   for (dword i = 0; i < nbytes; i++) {
+   for (unsigned int i = 0; i < nbytes; i++) {
       ((unsigned char*)buf)[i] = readByte(addr + i);
    }
    return nbytes;
 }
 
-//store a byte
-void writeByte(dword addr, byte val) {
+//store a unsigned char
+void writeByte(unsigned int addr, unsigned char val) {
+   if (getseg(addr) == NULL) {
+      throw 14;  //page fault exception ??
+   }
+   //could also check write to read only page
    if (checkStackRange(addr)) {
       patch_byte(addr, val);
    }
@@ -709,26 +719,26 @@ void writeByte(dword addr, byte val) {
 
 //don't interface to IDA's put_word/long routines so
 //that we can detect stack usage in writeByte
-void writeWord(dword addr, word val) {
-   writeByte(addr, (byte)val);
-   writeByte(addr + 1, (byte)(val >> 8));
+void writeWord(unsigned int addr, unsigned short val) {
+   writeByte(addr, (unsigned char)val);
+   writeByte(addr + 1, (unsigned char)(val >> 8));
 }
 
-void writeDword(dword addr, dword val) {
+void writeDword(unsigned int addr, unsigned int val) {
    if (makeImport) makeImportLabel(addr, val);
-   writeWord(addr, (word)val);
-   writeWord(addr + 2, (word)(val >> 16));
+   writeWord(addr, (unsigned short)val);
+   writeWord(addr + 2, (unsigned short)(val >> 16));
 }
 
 //all writes to memory should be through this function
-void writeMem(dword addr, dword val, byte size) {
+void writeMem(unsigned int addr, unsigned int val, unsigned char size) {
    addr += segmentBase;
    switch (size) {
       case SIZE_BYTE:
-         writeByte(addr, (byte)val);
+         writeByte(addr, (unsigned char)val);
          break;
       case SIZE_WORD:
-         writeWord(addr, (word)val);
+         writeWord(addr, (unsigned short)val);
          break;
       case SIZE_DWORD:
          writeDword(addr, val);
@@ -736,26 +746,26 @@ void writeMem(dword addr, dword val, byte size) {
    }
 }
 
-dword writeBuffer(dword addr, void *buf, dword nbytes) {
+unsigned int writeBuffer(unsigned int addr, void *buf, unsigned int nbytes) {
 //   int result = 0;
    addr += segmentBase;
-   for (dword i = 0; i < nbytes; i++) {
-      writeByte(addr + i, (byte)((unsigned char*)buf)[i]);
+   for (unsigned int i = 0; i < nbytes; i++) {
+      writeByte(addr + i, (unsigned char)((unsigned char*)buf)[i]);
    }
    return nbytes;
 }
 
-void push(dword val, byte size) {
+void push(unsigned int val, unsigned char size) {
    segmentBase = ssBase;
    segmentReg = _ss;
    esp -= size;
    writeMem(esp, val, size);
 }
 
-dword pop(byte size) {
+unsigned int pop(unsigned char size) {
    segmentBase = ssBase;
    segmentReg = _ss;
-   dword result = readMem(esp, size);
+   unsigned int result = readMem(esp, size);
    esp += size;
    return result;
 }
@@ -774,12 +784,14 @@ void doInterruptReturn() {
    }  //else no interrupts to return from!
 }
 
-void initiateInterrupt(dword interrupt_number, dword saved_eip) {
-   dword table = cpu.idtr.base + interrupt_number * 8;
+void initiateInterrupt(unsigned int interrupt_number, unsigned int saved_eip) {
+   unsigned int table = cpu.idtr.base + interrupt_number * 8;
    //need to pick segment reg value out of table as well
-   dword handler = readMem(table, SIZE_WORD);
+   unsigned int handler = readMem(table, SIZE_WORD);
    handler |= (readMem(table + 6, SIZE_WORD) << 16);
-   shouldBreak = 1;
+   if (breakOnExceptions) {
+      shouldBreak = 1;
+   }
    if (handler) {
       msg("x86emu: Initiating INT %d processing w/ handler %x\n", interrupt_number, handler);
       push(cpu.eflags, SIZE_DWORD);
@@ -823,25 +835,25 @@ void doSysenter() {
 }
 
 //read according to specified n from eip location
-dword fetch(byte n) {
+unsigned int fetch(unsigned char n) {
 //   segmentBase = csBase;
-   dword result = readMem(cpu.eip, n);
+   unsigned int result = readMem(cpu.eip, n);
 //   msg("Fetched %d bytes (%x) from %x\n", n, result, cpu.eip); 
    cpu.eip += n;
    return result;
 }
 
 //fetch an unsigned quantity
-dword fetchu(byte n) {
+unsigned int fetchu(unsigned char n) {
    return fetch(n) & SIZE_MASKS[n];
 }
 
 void fetchOperands16(AddrInfo *dest, AddrInfo *src) {
-   byte modrm = fetchu(SIZE_BYTE);
+   unsigned char modrm = fetchu(SIZE_BYTE);
    dest->modrm = modrm;
-   byte mod = MOD(modrm);
-   byte rm = RM(modrm);
-   dword disp = 0;
+   unsigned char mod = MOD(modrm);
+   unsigned char rm = RM(modrm);
+   unsigned int disp = 0;
    if (mod != MOD_3) {
       switch (rm) {
          case 0:
@@ -900,13 +912,13 @@ void fetchOperands(AddrInfo *dest, AddrInfo *src) {
       fetchOperands16(dest, src);
       return;
    }
-   byte modrm = fetchu(SIZE_BYTE);
+   unsigned char modrm = fetchu(SIZE_BYTE);
    dest->modrm = modrm;
-   byte mod = MOD(modrm);
-   byte rm = RM(modrm);
-   byte sib = 0;
-   dword disp = 0;
-   byte hasSib = 0;
+   unsigned char mod = MOD(modrm);
+   unsigned char rm = RM(modrm);
+   unsigned char sib = 0;
+   unsigned int disp = 0;
+   unsigned char hasSib = 0;
    if (mod != MOD_3) {
       if (rm == 4) {
          sib = fetchu(SIZE_BYTE);
@@ -936,10 +948,10 @@ void fetchOperands(AddrInfo *dest, AddrInfo *src) {
    if (src->type == TYPE_MEM) {
       src->addr += disp;
       if (hasSib) {
-         dword index = INDEX(sib);
+         unsigned int index = INDEX(sib);
          index = index == 4 ? 0 : cpu.general[index] * SCALE(sib);
          src->addr += index;
-         dword base = BASE(sib);
+         unsigned int base = BASE(sib);
          if (base == 5 && mod == MOD_0) {
             src->addr += fetch(SIZE_DWORD);
          }
@@ -995,8 +1007,8 @@ void setSegment() {
    }
 }
 
-dword getOperand(AddrInfo *op) {
-   dword mask = SIZE_MASKS[opsize];
+unsigned int getOperand(AddrInfo *op) {
+   unsigned int mask = SIZE_MASKS[opsize];
    switch (op->type) {
       case TYPE_REG:
          if (opsize == SIZE_BYTE && op->addr >= 4) {
@@ -1013,8 +1025,8 @@ dword getOperand(AddrInfo *op) {
    return 0;
 }
 
-void storeOperand(AddrInfo *op, dword val) {
-   dword mask = SIZE_MASKS[opsize];
+void storeOperand(AddrInfo *op, unsigned int val) {
+   unsigned int mask = SIZE_MASKS[opsize];
    val &= mask;
    if (op->type == TYPE_REG) {
       if (opsize == SIZE_BYTE && op->addr >= 4) {
@@ -1034,7 +1046,7 @@ void storeOperand(AddrInfo *op, dword val) {
 }
 
 //deal with sign, zero, and parity flags
-void setEflags(qword val, byte size) {
+void setEflags(unsigned long long val, unsigned char size) {
    val &= SIZE_MASKS[size]; //mask off upper bytes
    if (val) CLEAR(xZF);
    else SET(xZF);
@@ -1046,136 +1058,136 @@ void setEflags(qword val, byte size) {
 
 //Kris Kaspersky pointed out that the AF flag did not
 //function properly for normal adds and subtracts
-void checkAuxCarry(dword op1, dword op2, dword result) {
+void checkAuxCarry(unsigned int op1, unsigned int op2, unsigned int result) {
    bool aux = ((op1 ^ op2) & 0x10) != (result & 0x10);
    if (aux) SET(xAF);
    else CLEAR(xAF);
 }
 
-bool hasAddOverflow(dword op1, dword op2, dword sum) {
-   dword mask = SIGN_BITS[opsize];
+bool hasAddOverflow(unsigned int op1, unsigned int op2, unsigned int sum) {
+   unsigned int mask = SIGN_BITS[opsize];
    if ((op1 & op2 & ~sum & mask) || (~op1 & ~op2 & sum & mask)) return true;
    else return false;
 }
 
-void checkAddOverflow(dword op1, dword op2, dword sum) {
-   dword mask = SIGN_BITS[opsize];
+void checkAddOverflow(unsigned int op1, unsigned int op2, unsigned int sum) {
+   unsigned int mask = SIGN_BITS[opsize];
    if ((op1 & op2 & ~sum & mask) || (~op1 & ~op2 & sum & mask)) SET(xOF);
    else CLEAR(xOF);
 }
 
-dword add(qword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) + (op2 & mask);
+unsigned int add(unsigned long long op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned long long result = (op1 & mask) + (op2 & mask);
    if (result & CARRY_BITS[opsize]) SET(xCF);
    else CLEAR(xCF);
-   checkAddOverflow((dword)op1, op2, (dword)result);
+   checkAddOverflow((unsigned int)op1, op2, (unsigned int)result);
    setEflags(result, opsize);
-   checkAuxCarry((dword)op1, (dword)op2, (dword)result);
-   return (dword) result & mask;
+   checkAuxCarry((unsigned int)op1, (unsigned int)op2, (unsigned int)result);
+   return (unsigned int) result & mask;
 }
 
-dword adc(qword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) + (op2 & mask) + xC;
+unsigned int adc(unsigned long long op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned long long result = (op1 & mask) + (op2 & mask) + xC;
    if (result & CARRY_BITS[opsize]) SET(xCF);
    else CLEAR(xCF);
-   checkAddOverflow((dword)op1, op2, (dword)result);
+   checkAddOverflow((unsigned int)op1, op2, (unsigned int)result);
    setEflags(result, opsize);
-   checkAuxCarry((dword)op1, (dword)op2, (dword)result);
-   return (dword) result & mask;
+   checkAuxCarry((unsigned int)op1, (unsigned int)op2, (unsigned int)result);
+   return (unsigned int) result & mask;
 }
 
-bool hasSubOverflow(dword op1, dword op2, dword diff) {
-   dword mask = SIGN_BITS[opsize];
+bool hasSubOverflow(unsigned int op1, unsigned int op2, unsigned int diff) {
+   unsigned int mask = SIGN_BITS[opsize];
    if ((op1 & ~op2 & ~diff & mask) || (~op1 & op2 & diff & mask)) return false;
    else return false;
 }
 
-void checkSubOverflow(dword op1, dword op2, dword diff) {
-   dword mask = SIGN_BITS[opsize];
+void checkSubOverflow(unsigned int op1, unsigned int op2, unsigned int diff) {
+   unsigned int mask = SIGN_BITS[opsize];
    if ((op1 & ~op2 & ~diff & mask) || (~op1 & op2 & diff & mask)) SET(xOF);
    else CLEAR(xOF);
 }
 
-dword sub(qword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) - (op2 & mask);
+unsigned int sub(unsigned long long op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned long long result = (op1 & mask) - (op2 & mask);
    if (result & CARRY_BITS[opsize]) SET(xCF);
    else CLEAR(xCF);
-   checkSubOverflow((dword)op1, op2, (dword)result);
+   checkSubOverflow((unsigned int)op1, op2, (unsigned int)result);
    setEflags(result, opsize);
-   checkAuxCarry((dword)op1, (dword)op2, (dword)result);
-   return (dword) result & mask;
+   checkAuxCarry((unsigned int)op1, (unsigned int)op2, (unsigned int)result);
+   return (unsigned int) result & mask;
 }
 
-dword sbb(qword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) - (op2 & mask) - xC;
+unsigned int sbb(unsigned long long op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned long long result = (op1 & mask) - (op2 & mask) - xC;
    if (result & CARRY_BITS[opsize]) SET(xCF);
    else CLEAR(xCF);
-   checkSubOverflow((dword)op1, op2, (dword)result);
+   checkSubOverflow((unsigned int)op1, op2, (unsigned int)result);
    setEflags(result, opsize);
-   checkAuxCarry((dword)op1, (dword)op2, (dword)result);
-   return (dword) result & mask;
+   checkAuxCarry((unsigned int)op1, (unsigned int)op2, (unsigned int)result);
+   return (unsigned int) result & mask;
 }
 
-dword AND(dword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   dword result = (op1 & mask) & (op2 & mask);
+unsigned int AND(unsigned int op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned int result = (op1 & mask) & (op2 & mask);
    CLEAR(xCF | xOF);
    setEflags(result, opsize);
    return result & mask;
 }
 
-dword OR(dword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   dword result = (op1 & mask) | (op2 & mask);
+unsigned int OR(unsigned int op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned int result = (op1 & mask) | (op2 & mask);
    CLEAR(xCF | xOF);
    setEflags(result, opsize);
    return result & mask;
 }
 
-dword XOR(dword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   dword result = (op1 & mask) ^ (op2 & mask);
+unsigned int XOR(unsigned int op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned int result = (op1 & mask) ^ (op2 & mask);
    CLEAR(xCF | xOF);
    setEflags(result, opsize);
    return result & mask;
 }
 
-void cmp(qword op1, dword op2) {
-   dword mask = SIZE_MASKS[opsize];
-   qword result = (op1 & mask) - (op2 & mask);
+void cmp(unsigned long long op1, unsigned int op2) {
+   unsigned int mask = SIZE_MASKS[opsize];
+   unsigned long long result = (op1 & mask) - (op2 & mask);
    if (result & CARRY_BITS[opsize]) SET(xCF);
    else CLEAR(xCF);
-   checkSubOverflow((dword)op1, op2, (dword)result);
+   checkSubOverflow((unsigned int)op1, op2, (unsigned int)result);
    setEflags(result, opsize);
 }
 
-dword inc(qword op1) {
-   dword oldCarry = xC;
+unsigned int inc(unsigned long long op1) {
+   unsigned int oldCarry = xC;
    op1 = add(op1, 1);
    CLEAR(xCF);
    cpu.eflags |= oldCarry;
-   return (dword) op1;
+   return (unsigned int) op1;
 }
 
-dword dec(qword op1) {
-   dword oldCarry = xC;
+unsigned int dec(unsigned long long op1) {
+   unsigned int oldCarry = xC;
    op1 = sub(op1, 1);
    CLEAR(xCF);
    cpu.eflags |= oldCarry;
-   return (dword) op1;
+   return (unsigned int) op1;
 }
 
-void checkLeftOverflow(dword result, byte size) {
-   dword msb = result & SIGN_BITS[size];
+void checkLeftOverflow(unsigned int result, unsigned char size) {
+   unsigned int msb = result & SIGN_BITS[size];
    if ((msb && xC) || (!msb && xNC)) CLEAR(xOF);
    else SET(xOF);
 }
 
-dword rol(qword op, byte amt) {
+unsigned int rol(unsigned long long op, unsigned char amt) {
    //remove unnecessary rotations
    amt = amt & ROTATE_SIZE_MASKS[opsize];
    if (amt) {
@@ -1184,13 +1196,13 @@ dword rol(qword op, byte amt) {
       if (op & 1) SET(xCF);
       else CLEAR(xCF);
       if (amt == 1) {
-         checkLeftOverflow((dword)op, opsize);
+         checkLeftOverflow((unsigned int)op, opsize);
       }
    }
-   return (dword) op & SIZE_MASKS[opsize];
+   return (unsigned int) op & SIZE_MASKS[opsize];
 }
 
-dword ror(qword op, byte amt) {
+unsigned int ror(unsigned long long op, unsigned char amt) {
    //remove unnecessary rotations
    amt = amt & ROTATE_SIZE_MASKS[opsize];
    if (amt) {
@@ -1199,46 +1211,46 @@ dword ror(qword op, byte amt) {
       if (op & SIGN_BITS[opsize]) SET(xCF);
       else CLEAR(xCF);
       if (amt == 1) {
-         dword shift = (dword)op << 1;
-         shift = (shift ^ (dword)op) & SIGN_BITS[opsize];
+         unsigned int shift = (unsigned int)op << 1;
+         shift = (shift ^ (unsigned int)op) & SIGN_BITS[opsize];
          if (shift) SET(xOF);
          else CLEAR(xOF);
       }
    }
-   return (dword) op & SIZE_MASKS[opsize];
+   return (unsigned int) op & SIZE_MASKS[opsize];
 }
 
 //probably could do this faster with bit shifts but I am not
 //that concerned with speed
-dword rcl(qword op, byte amt) {
+unsigned int rcl(unsigned long long op, unsigned char amt) {
    //remove unnecessary rotations
    amt = amt % (ROTATE_SIZE_MASKS[opsize] + 2);
    if (amt) {
       if (xC) op |= CARRY_BITS[opsize];  //setup current carry
       else op &= ~CARRY_BITS[opsize];
       for (int i = amt; i; i--) {
-         qword temp = op & CARRY_BITS[opsize]; //get current carry
+         unsigned long long temp = op & CARRY_BITS[opsize]; //get current carry
          op <<= 1;
          if (temp) op |= 1; //feed carry back in right and
       }
       if (op & CARRY_BITS[opsize]) SET(xCF);  //set final carry
       else CLEAR(xCF);
       if (amt == 1) {
-         checkLeftOverflow((dword)op, opsize);
+         checkLeftOverflow((unsigned int)op, opsize);
       }
    }
-   return (dword) op & SIZE_MASKS[opsize];
+   return (unsigned int) op & SIZE_MASKS[opsize];
 }
 
 //probably could do this faster with bit shifts but I am not
 //that concerned with speed
-dword rcr(qword op, byte amt) {
+unsigned int rcr(unsigned long long op, unsigned char amt) {
    int temp = xC; //get initial carry
    //remove unnecessary rotations
    amt = amt % (ROTATE_SIZE_MASKS[opsize] + 2);
    if (amt) {
       if (amt == 1) {
-         checkLeftOverflow((dword)op, opsize);
+         checkLeftOverflow((unsigned int)op, opsize);
       }
       for (int i = amt; i; i--) {
          if (temp) op |= CARRY_BITS[opsize];  //prepare to feed carry in from left
@@ -1249,35 +1261,35 @@ dword rcr(qword op, byte amt) {
       if (temp) SET(xCF);  //set final carry
       else CLEAR(xCF);
    }
-   return (dword) op & SIZE_MASKS[opsize];
+   return (unsigned int) op & SIZE_MASKS[opsize];
 }
 
-dword shl(qword op, byte amt) {
+unsigned int shl(unsigned long long op, unsigned char amt) {
    if (amt) {
       op <<= amt;
       if (op & CARRY_BITS[opsize]) SET(xCF);
       else CLEAR(xCF);
       if (amt == 1) {
-         checkLeftOverflow((dword)op, opsize);
+         checkLeftOverflow((unsigned int)op, opsize);
       }
       setEflags(op, opsize);  //flags only affected when amt != 0
    }
-   return (dword) op & SIZE_MASKS[opsize];
+   return (unsigned int) op & SIZE_MASKS[opsize];
 }
 
 //mask op down to size before calling
-dword shiftRight(qword op, byte amt) {
+unsigned int shiftRight(unsigned long long op, unsigned char amt) {
    if (amt) {
-      dword final_carry = 1 << (amt - 1);
+      unsigned int final_carry = 1 << (amt - 1);
       if (op & final_carry) SET(xCF);
       else CLEAR(xCF);
       op >>= amt;
       setEflags(op, opsize);  //flags only affected when amt != 0
    }
-   return (dword) op;
+   return (unsigned int) op;
 }
 
-dword shr(qword op, byte amt) {
+unsigned int shr(unsigned long long op, unsigned char amt) {
    if (amt == 1) {
       if (op & SIGN_BITS[opsize]) SET(xOF);
       else CLEAR(xOF);
@@ -1285,17 +1297,17 @@ dword shr(qword op, byte amt) {
    return shiftRight(op & SIZE_MASKS[opsize], amt);
 }
 
-dword sar(qword op, byte amt) {
+unsigned int sar(unsigned long long op, unsigned char amt) {
    op = op & SIZE_MASKS[opsize];
    switch (opsize) {
       case SIZE_BYTE:
-         op = sedq(sebd((byte)op));
+         op = sedq(sebd((unsigned char)op));
          break;
       case SIZE_WORD:
-         op = sedq(sewd((word)op));
+         op = sedq(sewd((unsigned short)op));
          break;
       case SIZE_DWORD:
-         op = sedq((dword)op);
+         op = sedq((unsigned int)op);
          break;
    }
    if (amt == 1) {
@@ -1304,33 +1316,33 @@ dword sar(qword op, byte amt) {
    return shiftRight(op, amt);
 }
 
-dword shrd(qword op1, qword bits, byte amt) {
+unsigned int shrd(unsigned long long op1, unsigned long long bits, unsigned char amt) {
    if (amt) {
-      dword newCarry = 1 << (amt - 1);
+      unsigned int newCarry = 1 << (amt - 1);
       if (op1 & newCarry) SET(xCF);
       else CLEAR(xCF);
       bits <<= (BITS[opsize] - amt);
       op1 = ((op1 & SIZE_MASKS[opsize]) >> amt) | bits;
       setEflags(op1, opsize);
    }
-   return (dword) (op1 & SIZE_MASKS[opsize]);
+   return (unsigned int) (op1 & SIZE_MASKS[opsize]);
 }
 
-dword shld(qword op1, qword bits, byte amt) {
+unsigned int shld(unsigned long long op1, unsigned long long bits, unsigned char amt) {
    if (amt) {
-      dword newCarry = 1 << (BITS[opsize] - amt);
+      unsigned int newCarry = 1 << (BITS[opsize] - amt);
       if (op1 & newCarry) SET(xCF);
       else CLEAR(xCF);
       bits = (bits & SIZE_MASKS[opsize]) >> (BITS[opsize] - amt);
       op1 = (op1 << amt) | bits;
       setEflags(op1, opsize);
    }
-   return (dword) (op1 & SIZE_MASKS[opsize]);
+   return (unsigned int) (op1 & SIZE_MASKS[opsize]);
 }
 
 void dShift() {
    fetchOperands(&source, &dest);
-   byte amt;
+   unsigned char amt;
    if ((opcode & 7) == 4) {
       amt = fetch(SIZE_BYTE);
    }
@@ -1338,9 +1350,9 @@ void dShift() {
       amt = ecx & 0xFF;
    }
    amt &= 0x1F;
-   dword result;
-   dword op1 = getOperand(&dest);
-   dword op2 = getOperand(&source);
+   unsigned int result;
+   unsigned int op1 = getOperand(&dest);
+   unsigned int op2 = getOperand(&source);
    if (opcode < 0xA8) {
       result = shld(op1, op2, amt);
    }
@@ -1378,7 +1390,7 @@ unsigned int getLongShiftCount(AddrInfo *dest, AddrInfo *source) {
    }
 }
 
-void doCall(dword addr) {
+void doCall(unsigned int addr) {
 #ifdef __IDP__
    hookfunc hook = findHookedFunc(addr);
 //   hookfunc hook = findHook(instStart);
@@ -1405,7 +1417,7 @@ void doCall(dword addr) {
 #endif
 }
 
-int checkJumpFunction(dword addr) {
+int checkJumpFunction(unsigned int addr) {
 #ifdef __IDP__
    if (findHookedFunc(addr) || isModuleAddress(addr)) {
       // get the return address into eip
@@ -1419,12 +1431,12 @@ int checkJumpFunction(dword addr) {
 
 //handle instructions that begin w/ 0x0n
 int doZero() {
-   byte op = opcode & 0x0F;
-   dword result;
+   unsigned char op = opcode & 0x0F;
+   unsigned int result;
    if ((op & 0x7) < 6) {
       decodeAddressingModes();
-      dword op1 = getOperand(&dest);
-      dword op2 = getOperand(&source);
+      unsigned int op1 = getOperand(&dest);
+      unsigned int op2 = getOperand(&source);
       if (op < 8) { // ADD
          result = add(op1, op2);
       }
@@ -1453,12 +1465,12 @@ int doZero() {
 
 //handle instructions that begin w/ 0x1n
 int doOne() {
-   byte op = opcode & 0x0F;
-   dword result;
+   unsigned char op = opcode & 0x0F;
+   unsigned int result;
    if ((op & 0x7) < 6) {
       decodeAddressingModes();
-      dword op1 = getOperand(&dest);
-      dword op2 = getOperand(&source);
+      unsigned int op1 = getOperand(&dest);
+      unsigned int op2 = getOperand(&source);
       if (op < 8) { // ADC
          result = adc(op1, op2);
       }
@@ -1488,12 +1500,12 @@ int doOne() {
 
 //handle instructions that begin w/ 0x2n
 int doTwo() {
-   byte op = opcode & 0x0F;
-   dword result;
+   unsigned char op = opcode & 0x0F;
+   unsigned int result;
    if ((op & 0x7) < 6) {
       decodeAddressingModes();
-      dword op1 = getOperand(&dest);
-      dword op2 = getOperand(&source);
+      unsigned int op1 = getOperand(&dest);
+      unsigned int op2 = getOperand(&source);
       if (op < 8) { // AND
          result = AND(op1, op2);
       }
@@ -1508,9 +1520,9 @@ int doTwo() {
             prefix |= PREFIX_ES;
             return 0;
          case 7: { //DAA
-            dword al = eax & 0xFF;
+            unsigned int al = eax & 0xFF;
             if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
-               dword old_al = al;
+               unsigned int old_al = al;
                SET(xAF);
                al += 6;
                if (xC || ((al ^ old_al) & 0x10)) SET(xCF);
@@ -1533,9 +1545,9 @@ int doTwo() {
             prefix |= PREFIX_CS;
             return 0;
          case 0xF: { //DAS
-            dword al = eax & 0xFF;
+            unsigned int al = eax & 0xFF;
             if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
-               dword old_al = al;
+               unsigned int old_al = al;
                SET(xAF);
                al -= 6;
                if (xC || ((al ^ old_al) & 0x10)) SET(xCF);
@@ -1561,11 +1573,11 @@ int doTwo() {
 
 //handle instructions that begin w/ 0x3n
 int doThree() {
-   byte op = opcode & 0x0F;
+   unsigned char op = opcode & 0x0F;
    if ((op & 0x7) < 6) {
       decodeAddressingModes();
-      dword op1 = getOperand(&dest);
-      dword op2 = getOperand(&source);
+      unsigned int op1 = getOperand(&dest);
+      unsigned int op2 = getOperand(&source);
       if (op < 8) { // XOR
          storeOperand(&dest, XOR(op1, op2));
       }
@@ -1579,8 +1591,8 @@ int doThree() {
             prefix |= PREFIX_SS;
             return 0;
          case 7: {//AAA
-            dword al = eax & 0xFF;
-            dword ax = eax & 0xFF00;
+            unsigned int al = eax & 0xFF;
+            unsigned int ax = eax & 0xFF00;
             if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
                SET(xCF | xAF);
                ax += 0x100;
@@ -1597,8 +1609,8 @@ int doThree() {
             prefix |= PREFIX_DS;
             return 0;
          case 0xF: {//AAS
-            dword al = eax & 0xFF;
-            dword ax = eax & 0xFF00;
+            unsigned int al = eax & 0xFF;
+            unsigned int ax = eax & 0xFF00;
             if (((al & 0x0F) > 9) || (cpu.eflags & xAF)) {
                SET(xCF | xAF);
                ax = (ax - 0x100) & 0xFF00;
@@ -1618,11 +1630,11 @@ int doThree() {
 
 //handle instructions that begin w/ 0x4n
 int doFour() {
-   byte op = opcode & 0x0F;
-   byte reg = op & 7;
-   dword mask = SIZE_MASKS[opsize];
+   unsigned char op = opcode & 0x0F;
+   unsigned char reg = op & 7;
+   unsigned int mask = SIZE_MASKS[opsize];
    //skip source setup, just read the register
-   dword result = cpu.general[reg] & mask;
+   unsigned int result = cpu.general[reg] & mask;
    dest.type = TYPE_REG;
    dest.addr = reg;
    if (op < 8) { // INC
@@ -1638,8 +1650,8 @@ int doFour() {
 
 //handle instructions that begin w/ 0x5n
 int doFive() {
-   byte op = opcode & 0x0F;
-   byte reg = op & 7;
+   unsigned char op = opcode & 0x0F;
+   unsigned char reg = op & 7;
    //skip source setup, just setup the destination
    dest.type = TYPE_REG;
    dest.addr = reg;
@@ -1652,25 +1664,25 @@ int doFive() {
    return 1;
 }
 
-void stepd(byte size) {
+void stepd(unsigned char size) {
    xD ? (edi -= size) : (edi += size);
 }
 
-void steps(byte size) {
+void steps(unsigned char size) {
    xD ? (esi -= size) : (esi += size);
 }
 
-void step(byte size) {
+void step(unsigned char size) {
    stepd(size);
    steps(size);
 }
 
 //handle instructions that begin w/ 0x6n
 int doSix() {
-   byte op = opcode & 0x0F;
-   dword result = 0;
+   unsigned char op = opcode & 0x0F;
+   unsigned int result = 0;
    int op1, op2;
-   dword rep = prefix & PREFIX_REP;
+   unsigned int rep = prefix & PREFIX_REP;
    //skip source setup, just setup the destination
    dest.type = TYPE_REG;
    switch (op) {
@@ -1683,7 +1695,7 @@ int doSix() {
          break;
       case 1: {//POPA/POPAD
          for (int j = EDI; j >= EAX; j--) { //need signed number for this test
-            dest.addr = (dword)j;
+            dest.addr = (unsigned int)j;
             if (dest.addr == ESP) pop(opsize);
             else storeOperand(&dest, pop(opsize));
          }
@@ -1772,8 +1784,8 @@ int doSix() {
 
 //handle instructions that begin w/ 0x7n
 int doSeven() {
-   byte op = opcode & 0x0F;
-   dword imm = fetch(opsize);
+   unsigned char op = opcode & 0x0F;
+   unsigned int imm = fetch(opsize);
    int branch = 0;
    switch (op) {
       case 0: //JO
@@ -1833,17 +1845,17 @@ int doSeven() {
 
 //handle instructions that begin w/ 0x8n
 int doEight() {
-   byte op = opcode & 0x0F;
-   dword op1, op2;
-   byte size = op & 1 ? opsize : SIZE_BYTE;
+   unsigned char op = opcode & 0x0F;
+   unsigned int op1, op2;
+   unsigned char size = op & 1 ? opsize : SIZE_BYTE;
    switch (op) {
    case 0: case 1: case 2: case 3: {
-         //83 is sign extended byte->dword
+         //83 is sign extended unsigned char->unsigned int
          //is 82 ever actually used?
-         byte subop;
+         unsigned char subop;
          opsize = size;
          fetchOperands(&source, &dest); //we will ignore Gx info
-         subop = (byte) source.addr;
+         subop = (unsigned char) source.addr;
          op2 = fetch((op == 1) ? opsize : SIZE_BYTE);
          if (op == 3) op2 = sebd(op2);
          op1 = getOperand(&dest);
@@ -1883,7 +1895,7 @@ int doEight() {
          AND(getOperand(&source), getOperand(&dest));
       }
       else { //XCHG
-         dword temp = getOperand(&dest);
+         unsigned int temp = getOperand(&dest);
          storeOperand(&dest, getOperand(&source));
          storeOperand(&source, temp);
       }
@@ -1906,7 +1918,7 @@ int doEight() {
       //should generate invalid opcode #UD here if dest == CS
       //need to load segment shadow base from GDT/LDT
       unsigned int segReg = seg3_map[dest.addr];
-      word newSeg = (word)cpu.general[source.addr];
+      unsigned short newSeg = (unsigned short)cpu.general[source.addr];
       cpu.segReg[segReg] = newSeg;
       if (newSeg & 4) {
          //LDT descriptor
@@ -1918,7 +1930,7 @@ int doEight() {
       break;
    }
    case 0xF: {//POP
-         dword val = pop(opsize);
+         unsigned int val = pop(opsize);
          fetchOperands(&source, &dest); //no source, just generate destination info
          storeOperand(&dest, val);
       }
@@ -1929,8 +1941,8 @@ int doEight() {
 
 //handle instructions that begin w/ 0x9n
 int doNine() {
-   byte op = opcode & 0x0F;
-   dword temp;
+   unsigned char op = opcode & 0x0F;
+   unsigned int temp;
    dest.type = TYPE_REG;
    if (op < 8) { //0 is actually NOP, but we do XCHG eax, eax here
       dest.addr = op & 7;
@@ -1970,7 +1982,7 @@ int doNine() {
             cpu.eflags |= temp;
             break;
          case 0xF: //LAHF
-            temp = cpu.eflags & SIZE_MASKS[SIZE_BYTE] << 8;
+            temp = (cpu.eflags & SIZE_MASKS[SIZE_BYTE]) << 8;
             eax &= ~H_MASK;
             eax |= temp;
             break;
@@ -1981,12 +1993,12 @@ int doNine() {
 
 //handle instructions that begin w/ 0xAn
 int doTen() {
-   byte op = opcode & 0x0F;
-   dword data;
-   dword rep = prefix & PREFIX_REP;
-   dword repne = prefix & PREFIX_REPNE;
-   dword loop = prefix & (PREFIX_REP | PREFIX_REPNE);
-   dword override = prefix & PREFIX_ADDR;
+   unsigned char op = opcode & 0x0F;
+   unsigned int data;
+   unsigned int rep = prefix & PREFIX_REP;
+   unsigned int repne = prefix & PREFIX_REPNE;
+   unsigned int loop = prefix & (PREFIX_REP | PREFIX_REPNE);
+   unsigned int override = prefix & PREFIX_ADDR;
    dest.addr = EAX;
    dest.type = TYPE_REG;
    switch (op) {
@@ -2013,7 +2025,7 @@ int doTen() {
          if (rep) {
             while (ecx) {
                source.addr = esi;
-               dword val = getOperand(&source);
+               unsigned int val = getOperand(&source);
                segmentBase = esBase;
                segmentReg = _es;
                writeMem(edi, val, opsize);
@@ -2023,7 +2035,7 @@ int doTen() {
          }
          else {
             source.addr = esi;
-            dword val = getOperand(&source);
+            unsigned int val = getOperand(&source);
             segmentBase = esBase;
             segmentReg = _es;
             writeMem(edi, val, opsize);
@@ -2037,7 +2049,7 @@ int doTen() {
          if (loop) {
             while (ecx) {
                source.addr = esi;
-               dword val = getOperand(&source);
+               unsigned int val = getOperand(&source);
                segmentBase = esBase;
                segmentReg = _es;
                cmp(val, readMem(edi, opsize));
@@ -2049,7 +2061,7 @@ int doTen() {
          }
          else {
             source.addr = esi;
-            dword val = getOperand(&source);
+            unsigned int val = getOperand(&source);
             segmentBase = esBase;
             segmentReg = _es;
             cmp(val, readMem(edi, opsize));
@@ -2087,7 +2099,7 @@ int doTen() {
          if (rep) {
             while (ecx) {
                source.addr = esi;
-               dword val = getOperand(&source);
+               unsigned int val = getOperand(&source);
                eax &= ~SIZE_MASKS[opsize];
                eax |= val;
                steps(opsize);
@@ -2096,7 +2108,7 @@ int doTen() {
          }
          else {
             source.addr = esi;
-            dword val = getOperand(&source);
+            unsigned int val = getOperand(&source);
             eax &= ~SIZE_MASKS[opsize];
             eax |= val;
             steps(opsize);
@@ -2127,11 +2139,11 @@ int doTen() {
 
 //handle instructions that begin w/ 0xBn
 int doEleven() {
-   byte op = opcode & 0x0F;
+   unsigned char op = opcode & 0x0F;
    dest.addr = op & 7;
    dest.type = TYPE_REG;
    if (op < 8) {
-      dword data = fetch(SIZE_BYTE);
+      unsigned int data = fetch(SIZE_BYTE);
       if (op < 4) {
          opsize = SIZE_BYTE;
          storeOperand(&dest, data);
@@ -2150,9 +2162,9 @@ int doEleven() {
 
 //handle instructions that begin w/ 0xCn
 int doTwelve() {
-   byte op = opcode & 0x0F;
-   byte subop;
-   dword delta, temp;
+   unsigned char op = opcode & 0x0F;
+   unsigned char subop;
+   unsigned int delta, temp;
    switch (op) {
       case 0: //
          opsize = SIZE_BYTE;
@@ -2263,14 +2275,14 @@ int doTwelve() {
 
 //handle instructions that begin w/ 0xDn
 int doThirteen() {
-   byte op = opcode & 0x0F;
-   byte subop = 0;
-   dword delta, temp;
+   unsigned char op = opcode & 0x0F;
+   unsigned char subop = 0;
+   unsigned int delta, temp;
    float *fp32 = NULL;
    double *fp64 = NULL;
    long double *fp80 = NULL;
    short *i16 = NULL;
-   quad *i64 = NULL;
+   unsigned long long *i64 = NULL;
    int i32[3];
    long double dbl;
    if (op > 7) {
@@ -2285,7 +2297,7 @@ int doThirteen() {
       fp64 = (double*)i32;
       fp80 = (long double*)i32;
       i16 = (short*)i32;
-      i64 = (quad*)i32;
+      i64 = (unsigned long long*)i32;
    }
    switch (op) {
       case 0: case 2: //
@@ -2320,10 +2332,10 @@ int doThirteen() {
          }
          break;
       case 4: case 5: {//AAM / AAD
-         dword base = fetchu(SIZE_BYTE);
-         dword al = eax & 0xFF;
-         dword ah = (eax >> 8) & 0xFF;
-         dword ax = (op == 4) ? ((al / base) << 8) | (al % base) :
+         unsigned int base = fetchu(SIZE_BYTE);
+         unsigned int al = eax & 0xFF;
+         unsigned int ah = (eax >> 8) & 0xFF;
+         unsigned int ax = (op == 4) ? ((al / base) << 8) | (al % base) :
                                 (al + ah * base) & 0xFF;
          setEflags(ax, SIZE_WORD);
          eax = (eax & ~SIZE_MASKS[SIZE_WORD]) | ax;
@@ -2961,7 +2973,7 @@ int doThirteen() {
                   fpuSetPointers(source.addr, 0xDD00 | dest.modrm);
                   break;
                case 1:    //FISTTP
-                  *i64 = (quad)fpuPop();
+                  *i64 = (unsigned long long)fpuPop();
                   if (FPU_MASK_GET(FPU_INVALID) || !FPU_GET(FPU_STACKFAULT)) {
                      writeMem(source.addr, i32[0], SIZE_DWORD);
                      writeMem(source.addr + 4, i32[1], SIZE_DWORD);
@@ -3200,7 +3212,7 @@ int doThirteen() {
                   i32[2] = readMem(source.addr + 8, SIZE_WORD);
                   break;
                case 5:    //FILD
-                  //source.addr is qword*
+                  //source.addr is unsigned long long*
                   i32[0] = readMem(source.addr, SIZE_DWORD);
                   i32[1] = readMem(source.addr + 4, SIZE_DWORD);
                   fpuPush(*fp80);
@@ -3212,8 +3224,8 @@ int doThirteen() {
                   fpuSetPointers(0, 0xDF00 | dest.modrm);
                   break;
                case 7:    //FISTP
-                  //source.addr is qword*
-                  *i64 = (quad)fpuPop();
+                  //source.addr is unsigned long long*
+                  *i64 = (unsigned long long)fpuPop();
                   if (FPU_MASK_GET(FPU_INVALID) || !FPU_GET(FPU_STACKFAULT)) {
                      writeMem(source.addr, i32[0], SIZE_DWORD);
                      writeMem(source.addr + 4, i32[1], SIZE_DWORD);
@@ -3250,9 +3262,9 @@ int doThirteen() {
 
 //handle instructions that begin w/ 0xEn
 int doFourteen() {
-   byte op = opcode & 0x0F;
-   dword disp;
-   dword cond;
+   unsigned char op = opcode & 0x0F;
+   unsigned int disp;
+   unsigned int cond;
    if (op < 4) {
       disp = fetch(SIZE_BYTE);
       if (op < 3) { //LOOPNE/LOOPNZ, LOOPE/LOOPZ, LOOP
@@ -3313,10 +3325,10 @@ int doFourteen() {
 
 //handle instructions that begin w/ 0xFn
 int doFifteen() {
-   byte op = opcode & 0x0F;
-   qword temp, divisor;
+   unsigned char op = opcode & 0x0F;
+   unsigned long long temp, divisor;
    if ((op & 7) > 5) { //subgroup
-      byte subop;
+      unsigned char subop;
       fetchOperands(&source, &dest);
       subop = source.addr;
       if (op < 8) { //Unary group 3
@@ -3330,7 +3342,7 @@ int doFifteen() {
                break;
             case 3: //NEG
                temp = getOperand(&dest);
-               storeOperand(&dest, sub(0, (dword)temp));
+               storeOperand(&dest, sub(0, (unsigned int)temp));
                if (temp) SET(xCF);
                else CLEAR(xCF);
                break;
@@ -3343,14 +3355,14 @@ int doFifteen() {
                temp *= getOperand(&dest); //multiply by EAX
                if (opsize == SIZE_BYTE) {
                   opsize = SIZE_WORD;
-                  storeOperand(&dest, (dword)temp);
+                  storeOperand(&dest, (unsigned int)temp);
                   temp >>= 8;
                }
                else {
-                  storeOperand(&dest, (dword)temp);
+                  storeOperand(&dest, (unsigned int)temp);
                   dest.addr = EDX;
                   temp >>= opsize == SIZE_WORD ? 16 : 32;
-                  storeOperand(&dest, (dword)temp);
+                  storeOperand(&dest, (unsigned int)temp);
                }
                if (temp) SET(xCF | xOF);
                else CLEAR(xCF | xOF);
@@ -3374,15 +3386,15 @@ int doFifteen() {
                else {
                   dest.addr = EAX;
                   dest.type = TYPE_REG;
-                  storeOperand(&dest, (dword) (temp / divisor));
+                  storeOperand(&dest, (unsigned int) (temp / divisor));
                   dest.addr = EDX;
-                  storeOperand(&dest, (dword) (temp % divisor));
+                  storeOperand(&dest, (unsigned int) (temp % divisor));
                }
                break;
          }
       }
       else { //group4/5
-         dword result;
+         unsigned int result;
          if (op == 0xE) opsize = SIZE_BYTE; //should only be a group 4
          if (subop < 2) { //INC/DEC
             if (subop == 0) result = inc(getOperand(&dest));
@@ -3397,7 +3409,7 @@ int doFifteen() {
                case 3: //CALLF
                   break;
                case 4: { //JMPN
-                     dword addr = getOperand(&dest);
+                     unsigned int addr = getOperand(&dest);
                      if (!checkJumpFunction(addr)) {
                         cpu.eip = addr;
                      }
@@ -3455,7 +3467,7 @@ int doFifteen() {
    return 1;
 }
 
-int doSet(byte cc) {
+int doSet(unsigned char cc) {
    int set = 0;
    fetchOperands(&source, &dest);
    opsize = SIZE_BYTE;
@@ -3513,24 +3525,24 @@ int doSet(byte cc) {
    return 1;
 }
 
-dword doBitReset(dword val, int mask) {
+unsigned int doBitReset(unsigned int val, int mask) {
    return val &= ~mask;
 }
 
-dword doBitSet(dword val, int mask) {
+unsigned int doBitSet(unsigned int val, int mask) {
    return val |= mask;
 }
 
-dword doBitComplement(dword val, int mask) {
+unsigned int doBitComplement(unsigned int val, int mask) {
    return val ^= mask;
 }
 
-dword doBitTest(dword val, int /*mask*/) {
+unsigned int doBitTest(unsigned int val, int /*mask*/) {
    return val;
 }
 
-void doBitOp(dword (*bitop)(dword, int)) {
-   dword result;
+void doBitOp(unsigned int (*bitop)(unsigned int, int)) {
+   unsigned int result;
    int bitpos;
 //   msg("fetching bitop operands, eip = %x\n", cpu.eip);
    fetchOperands(&source, &dest);
@@ -3553,7 +3565,7 @@ void doBitOp(dword (*bitop)(dword, int)) {
 }
 
 void doBitOpGrp8() {
-   dword result;
+   unsigned int result;
    int bitpos;
    fetchOperands(&source, &dest);
    bitpos = fetchu(SIZE_BYTE) & ~32;
@@ -3586,7 +3598,7 @@ void doBitOpGrp8() {
 }
 
 int doEscape() {
-   dword result, regs, upper, lower;
+   unsigned int result, regs, upper, lower;
    int op1, op2, n;
    opcode = fetchu(SIZE_BYTE);
    upper = opcode >> 4;
@@ -3777,8 +3789,8 @@ int doEscape() {
       case 3: { //
          switch (lower) {
             case 1: //RDTSC
-               edx = (dword) tsc.high;
-               eax = (dword) tsc.low;
+               edx = (unsigned int) tsc.high;
+               eax = (unsigned int) tsc.low;
                break;
             case 4: //SYSENTER
                doSysenter();
@@ -4734,7 +4746,7 @@ int doEscape() {
          }
          break;
       case 8: //Jcc
-         return doSeven(); //one byte Jcc handler
+         return doSeven(); //one unsigned char Jcc handler
       case 9: //SET
          return doSet(lower);
       case 0xA: //IMUL, SHRD, SHLD
@@ -4811,8 +4823,8 @@ int doEscape() {
                fetchOperands(&dest, &source);
                result = getOperand(&source);
                if (opcode & 8) { //MOVSX
-                  if (opsize == SIZE_BYTE) result = sebd((byte)result);
-                  else result = sewd((word)result);
+                  if (opsize == SIZE_BYTE) result = sebd((unsigned char)result);
+                  else result = sewd((unsigned short)result);
                }
                opsize = SIZE_DWORD;
                storeOperand(&dest, result);
@@ -4831,7 +4843,7 @@ int doEscape() {
                }
                else {
                   CLEAR(xZF);
-                  dword result = 0;
+                  unsigned int result = 0;
                   for (int i = 0; i < BITS[opsize]; i++) {
                      if (src & 1) {
                         storeOperand(&dest, result);
@@ -4851,7 +4863,7 @@ int doEscape() {
                }
                else {
                   CLEAR(xZF);
-                  dword result = BITS[opsize] - 1;
+                  unsigned int result = BITS[opsize] - 1;
                   for (int i = 0; i < BITS[opsize]; i++) {
                      if (src & SIGN_BITS[opsize]) {
                         storeOperand(&dest, result);
@@ -4877,8 +4889,8 @@ int doEscape() {
                   opsize = SIZE_BYTE;
                case 1: {    //XADD
                   fetchOperands(&source, &dest);
-                  dword op1 = getOperand(&dest);
-                  dword op2 = getOperand(&source);
+                  unsigned int op1 = getOperand(&dest);
+                  unsigned int op2 = getOperand(&source);
                   result = add(op1, op2);
                   storeOperand(&dest, result);
                   storeOperand(&source, op1);
@@ -5996,7 +6008,7 @@ int executeInstruction() {
           ((dr7 & 0x40) && (cpu.eip == dr3))) {
           msg("hardware breakpoint at 0x%x\n", cpu.eip);
           initiateInterrupt(1, cpu.initial_eip);
-         //return from here with update eip as a result of jumping to exception handler
+         //return from here with updated eip as a result of jumping to exception handler
          //otherwise if we fall through first instruction in exception handler gets executed.
          return 0;
       }
@@ -6006,18 +6018,22 @@ int executeInstruction() {
    if (isModuleAddress(cpu.eip)) {
       //eip is pointing into a dll.  Treat as a direct jump
       //to a dll function with return address already on the stack
-      dword nextAddr = pop(SIZE_DWORD);
+      unsigned int nextAddr = pop(SIZE_DWORD);
       doCall(cpu.eip);
       cpu.eip = nextAddr;
    }
    else {
-      while (!done) {
-         fpuStart = cpu.eip;
-         opcode = fetchu(SIZE_BYTE);
-         if ((opcode & 0xF0) == 0x70) {
-            opsize = SIZE_BYTE;
+      try {
+         while (!done) {
+            fpuStart = cpu.eip;
+            opcode = fetchu(SIZE_BYTE);
+            if ((opcode & 0xF0) == 0x70) {
+               opsize = SIZE_BYTE;
+            }
+            done = (*table_0[(opcode >> 4) & 0x0F])();
          }
-         done = (*table_0[(opcode >> 4) & 0x0F])();
+      } catch (int exc) {
+         initiateInterrupt(exc, cpu.initial_eip);       
       }
    }
    tsc.ll += 5;

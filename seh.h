@@ -78,12 +78,12 @@
 #define MAXIMUM_PARMS 15
 
 struct EXCEPTION_RECORD {
-   dword exceptionCode;
-   dword exceptionFlags;
-   dword exceptionRecord;  //struct _EXCEPTION_RECORD *ExceptionRecord
-   dword exceptionAddress;
-   dword numberParameters;
-   dword exceptionInformation[MAXIMUM_PARMS];
+   unsigned int exceptionCode;
+   unsigned int exceptionFlags;
+   unsigned int exceptionRecord;  //struct _EXCEPTION_RECORD *ExceptionRecord
+   unsigned int exceptionAddress;
+   unsigned int numberParameters;
+   unsigned int exceptionInformation[MAXIMUM_PARMS];
 };
 
 struct EXCEPTION_POINTERS {
@@ -92,12 +92,12 @@ struct EXCEPTION_POINTERS {
 };
 
 struct ERR {
-   dword nextErr;  //struct _ERR *nextErr;
-   dword handler;  //pointer to handler
+   unsigned int nextErr;  //struct _ERR *nextErr;
+   unsigned int handler;  //pointer to handler
 };   
 
 int usingSEH();
-void sehBegin(dword interrupt_number);
+void sehBegin(unsigned int interrupt_number);
 void sehReturn();
 void vehReturn();
 void breakpointException();
@@ -111,7 +111,7 @@ void saveVEHState(Buffer &b);
 void loadVEHState(Buffer &b);
 struct WIN_CONTEXT *getContext();
 
-void addVectoredExceptionHandler(bool first, dword handler);
-void removeVectoredExceptionHandler(dword handler);
+void addVectoredExceptionHandler(bool first, unsigned int handler);
+void removeVectoredExceptionHandler(unsigned int handler);
 
 #endif

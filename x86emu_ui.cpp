@@ -168,9 +168,9 @@ void updateRegisterControl(int controlID) {
 
 //get an int value from edit box string
 //assumes value is a valid hex string
-dword getEditBoxInt(HWND dlg, int dlgItem) {
+unsigned int getEditBoxInt(HWND dlg, int dlgItem) {
    char value[80];
-   dword newVal = 0;
+   unsigned int newVal = 0;
    GetDlgItemText(dlg, dlgItem, value, 80);
    if (strlen(value) != 0) {
 //      sscanf(value, "%X", &newVal);
@@ -280,7 +280,7 @@ void showErrorMessage(const char *msg) {
 }
 
 static const char *unemulatedName;
-static dword unemulatedAddr;
+static unsigned int unemulatedAddr;
 
 struct UnemulatedCbStruct {
    HWND dlg;
@@ -352,7 +352,7 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
       case WM_COMMAND:
          switch (LOWORD(wParam)) {
             case IDOK: {//OK Button
-               dword retval = 0;
+               unsigned int retval = 0;
                GetDlgItemText(hwndDlg, IDC_RETURN_VALUE, buf, sizeof(buf));
                if (strlen(buf)) {
                   retval = strtoul(buf, NULL, 0);
@@ -360,8 +360,8 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
                }
 
                GetDlgItemText(hwndDlg, IDC_CLEAR_STACK, buf, sizeof(buf));
-               dword stackfree = strtoul(buf, NULL, 0);
-               dword callType = 0xFFFFFFFF;
+               unsigned int stackfree = strtoul(buf, NULL, 0);
+               unsigned int callType = 0xFFFFFFFF;
                if (IsDlgButtonChecked(hwndDlg, IDC_CALL_CDECL) == BST_CHECKED) {
                   callType = CALL_CDECL;
                }
@@ -389,7 +389,7 @@ BOOL CALLBACK UnemulatedDlgProc(HWND hwndDlg, UINT message,
 /*
  * This function is used for all unemulated API functions
  */
-void handleUnemulatedFunction(dword addr, const char *name) {
+void handleUnemulatedFunction(unsigned int addr, const char *name) {
    unemulatedName = name;
    unemulatedAddr = addr;
    DialogBox(hModule, MAKEINTRESOURCE(IDD_UNEMULATED), x86Dlg, UnemulatedDlgProc);
@@ -460,9 +460,9 @@ BOOL CALLBACK SegmentDlgProc(HWND hwndDlg, UINT message,
          switch (LOWORD(wParam)) {
             case IDOK: //OK Button
                for (i = IDC_CS_REG; i <= IDC_GS_BASE; i++) {
-//                  dword newVal;
+//                  unsigned int newVal;
                   GetDlgItemText(hwndDlg, i, buf, 16);
-                  dword newVal = strtoul(buf, NULL, 0);
+                  unsigned int newVal = strtoul(buf, NULL, 0);
 //                  sscanf(buf, "%X", &newVal);
                   if (i < IDC_CS_BASE) {
                      cpu.segReg[i  - IDC_CS_REG] = (short)newVal;
@@ -565,7 +565,7 @@ BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message,
    switch (message) {
       case WM_INITDIALOG: {
          char buf[32];
-         ::qsnprintf(buf, sizeof(buf), "0x%08X", (dword)get_screen_ea());
+         ::qsnprintf(buf, sizeof(buf), "0x%08X", (unsigned int)get_screen_ea());
          SendDlgItemMessage(hwndDlg, IDC_MEM_ADDR, WM_SETFONT, (WPARAM)fixed, FALSE);
          SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_SETFONT, (WPARAM)fixed, FALSE);
          SetDlgItemText(hwndDlg, IDC_MEM_ADDR, buf);
@@ -576,9 +576,9 @@ BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message,
       case WM_COMMAND:
          switch (LOWORD(wParam)) {
          case IDOK: {//OK Button
-               dword btn;
-               dword addr = getEditBoxInt(hwndDlg, IDC_MEM_ADDR);
-               dword len = SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_GETTEXTLENGTH, (WPARAM)0, (LPARAM)0);
+               unsigned int btn;
+               unsigned int addr = getEditBoxInt(hwndDlg, IDC_MEM_ADDR);
+               unsigned int len = SendDlgItemMessage(hwndDlg, IDC_MEM_VALUES, WM_GETTEXTLENGTH, (WPARAM)0, (LPARAM)0);
                char *vals = (char*) malloc(len + 1);
                char *v = vals;
                GetDlgItemText(hwndDlg, IDC_MEM_VALUES, vals, len + 1);
@@ -595,7 +595,7 @@ BOOL CALLBACK SetMemoryDlgProc(HWND hwndDlg, UINT message,
                   if (btn == IDC_MEM_ASCIIZ) writeMem(addr, 0, SIZE_BYTE);
                   break;
                case IDC_HEX_BYTES: case IDC_HEX_WORDS: case IDC_HEX_DWORDS: {
-                     dword sz = btn - IDC_HEX_BYTES + 1;
+                     unsigned int sz = btn - IDC_HEX_BYTES + 1;
                      char *ptr;
                      while (ptr = strchr(v, ' ')) {
                         *ptr++ = 0;
@@ -769,9 +769,20 @@ BOOL CALLBACK DlgProc(HWND hwndDlg, UINT message,
                   CheckMenuItem(menu, IDC_LOGLIB, MF_BYCOMMAND | MF_UNCHECKED);
                }
                else {
-                  CheckMenuItem(menu, IDC_TRACE, MF_BYCOMMAND | MF_CHECKED);
+                  CheckMenuItem(menu, IDC_LOGLIB, MF_BYCOMMAND | MF_CHECKED);
                }
                setLogLibrary(!logLibrary());
+               return TRUE;
+            }
+            case ID_EMULATE_BREAKONEXCEPTIONS: {
+               HMENU menu = GetMenu(x86Dlg);
+               if (breakOnExceptions) {
+                  CheckMenuItem(menu, ID_EMULATE_BREAKONEXCEPTIONS, MF_BYCOMMAND | MF_UNCHECKED);
+               }
+               else {
+                  CheckMenuItem(menu, ID_EMULATE_BREAKONEXCEPTIONS, MF_BYCOMMAND | MF_CHECKED);
+               }
+               setBreakOnExceptions(!breakOnExceptions);
                return TRUE;
             }
             case IDC_LOADLIB: //load a library file into the database

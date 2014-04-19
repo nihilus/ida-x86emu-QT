@@ -35,9 +35,9 @@
 
 struct FunctionInfo {
    char *fname;
-   dword result;
-   dword stackItems;
-   dword callingConvention;
+   unsigned int result;
+   unsigned int stackItems;
+   unsigned int callingConvention;
 #if IDA_SDK_VERSION >= 650
    tinfo_t ftype;
 #else
@@ -96,17 +96,17 @@ void emu_calloc(unsigned int addr = 0);
 void emu_realloc(unsigned int addr = 0);
 void emu_free(unsigned int addr = 0);
 
-void emu_IsDebuggerPresent(dword addr = 0);
-void emu_CheckRemoteDebuggerPresent(dword addr = 0);
+void emu_IsDebuggerPresent(unsigned int addr = 0);
+void emu_CheckRemoteDebuggerPresent(unsigned int addr = 0);
 
-void emu_CloseHandle(dword addr = 0);
-void emu_NtQuerySystemInformation(dword addr = 0);
-void emu_NtQueryInformationProcess(dword addr = 0);
-void emu_NtSetInformationThread(dword addr = 0);
-void emu_GetCurrentProcessId(dword addr = 0);
-void emu_GetCurrentProcess(dword addr = 0);
-void emu_GetCurrentThreadId(dword addr = 0);
-void emu_GetThreadContext(dword addr = 0);
+void emu_CloseHandle(unsigned int addr = 0);
+void emu_NtQuerySystemInformation(unsigned int addr = 0);
+void emu_NtQueryInformationProcess(unsigned int addr = 0);
+void emu_NtSetInformationThread(unsigned int addr = 0);
+void emu_GetCurrentProcessId(unsigned int addr = 0);
+void emu_GetCurrentProcess(unsigned int addr = 0);
+void emu_GetCurrentThreadId(unsigned int addr = 0);
+void emu_GetThreadContext(unsigned int addr = 0);
 
 void emu_RevertToSelf(unsigned int addr);
 void emu_AreAnyAccessesGranted(unsigned int addr);
@@ -156,73 +156,73 @@ void emu_GetVersionExA(unsigned int addr);
 void emu_GetVersion(unsigned int addr);
 void emu_GetTickCount(unsigned int addr);
 
-void emu_GetSystemTimeAsFileTime(dword addr);
-void emu_QueryPerformanceCounter(dword addr);
+void emu_GetSystemTimeAsFileTime(unsigned int addr);
+void emu_QueryPerformanceCounter(unsigned int addr);
 
-void emu_InterlockedIncrement(dword addr);
-void emu_InterlockedDecrement(dword addr);
-void emu_EncodePointer(dword addr);
-void emu_DecodePointer(dword addr);
+void emu_InterlockedIncrement(unsigned int addr);
+void emu_InterlockedDecrement(unsigned int addr);
+void emu_EncodePointer(unsigned int addr);
+void emu_DecodePointer(unsigned int addr);
 
-void emu_InitializeCriticalSection(dword addr);
-void emu_InitializeCriticalSectionAndSpinCount(dword addr);
-void emu_TryEnterCriticalSection(dword addr);
-void emu_EnterCriticalSection(dword addr);
-void emu_LeaveCriticalSection(dword addr);
-void emu_DeleteCriticalSection(dword addr);
+void emu_InitializeCriticalSection(unsigned int addr);
+void emu_InitializeCriticalSectionAndSpinCount(unsigned int addr);
+void emu_TryEnterCriticalSection(unsigned int addr);
+void emu_EnterCriticalSection(unsigned int addr);
+void emu_LeaveCriticalSection(unsigned int addr);
+void emu_DeleteCriticalSection(unsigned int addr);
 
-void emu_AddVectoredExceptionHandler(dword addr);
-void emu_RemoveVectoredExceptionHandler(dword addr);
+void emu_AddVectoredExceptionHandler(unsigned int addr);
+void emu_RemoveVectoredExceptionHandler(unsigned int addr);
 
-void emu_Sleep(dword addr);
+void emu_Sleep(unsigned int addr);
 
-void emu_GetLastError(dword addr);
-void emu_SetLastError(dword addr);
+void emu_GetLastError(unsigned int addr);
+void emu_SetLastError(unsigned int addr);
 
-void emu_TlsAlloc(dword addr);
-void emu_TlsFree(dword addr);
-void emu_TlsGetValue(dword addr);
-void emu_TlsSetValue(dword addr);
+void emu_TlsAlloc(unsigned int addr);
+void emu_TlsFree(unsigned int addr);
+void emu_TlsGetValue(unsigned int addr);
+void emu_TlsSetValue(unsigned int addr);
 
-void emu_FlsAlloc(dword addr);
-void emu_FlsFree(dword addr);
-void emu_FlsGetValue(dword addr);
-void emu_FlsSetValue(dword addr);
+void emu_FlsAlloc(unsigned int addr);
+void emu_FlsFree(unsigned int addr);
+void emu_FlsGetValue(unsigned int addr);
+void emu_FlsSetValue(unsigned int addr);
 
-void emu_GetEnvironmentStringsA(dword addr);
-void emu_GetEnvironmentStringsW(dword addr);
-void emu_FreeEnvironmentStringsA(dword addr);
-void emu_FreeEnvironmentStringsW(dword addr);
-void emu_GetCommandLineA(dword addr);
-void emu_GetCommandLineW(dword addr);
+void emu_GetEnvironmentStringsA(unsigned int addr);
+void emu_GetEnvironmentStringsW(unsigned int addr);
+void emu_FreeEnvironmentStringsA(unsigned int addr);
+void emu_FreeEnvironmentStringsW(unsigned int addr);
+void emu_GetCommandLineA(unsigned int addr);
+void emu_GetCommandLineW(unsigned int addr);
 
-void emu_GetStdHandle(dword addr);
-void emu_GetStartupInfoA(dword addr);
-void emu_GetStartupInfoW(dword addr);
+void emu_GetStdHandle(unsigned int addr);
+void emu_GetStartupInfoA(unsigned int addr);
+void emu_GetStartupInfoW(unsigned int addr);
 
-void emu_GetCPInfo(dword addr);
-void emu_WideCharToMultiByte(dword addr);
-void emu_MultiByteToWideChar(dword addr);
-void emu_GetStringTypeW(dword addr);
-void emu_GetStringTypeA(dword addr);
-void emu_LCMapStringW(dword addr);
-void emu_LCMapStringA(dword addr);
+void emu_GetCPInfo(unsigned int addr);
+void emu_WideCharToMultiByte(unsigned int addr);
+void emu_MultiByteToWideChar(unsigned int addr);
+void emu_GetStringTypeW(unsigned int addr);
+void emu_GetStringTypeA(unsigned int addr);
+void emu_LCMapStringW(unsigned int addr);
+void emu_LCMapStringA(unsigned int addr);
 
-void emu_GetLocaleInfoA(dword addr);
-void emu_GetLocaleInfoW(dword addr);
+void emu_GetLocaleInfoA(unsigned int addr);
+void emu_GetLocaleInfoW(unsigned int addr);
 
-void emu_GetWindowsDirectoryA(dword addr);
-void emu_GetWindowsDirectoryW(dword addr);
-void emu_GetSystemDirectoryA(dword addr);
-void emu_GetSystemDirectoryW(dword addr);
+void emu_GetWindowsDirectoryA(unsigned int addr);
+void emu_GetWindowsDirectoryW(unsigned int addr);
+void emu_GetSystemDirectoryA(unsigned int addr);
+void emu_GetSystemDirectoryW(unsigned int addr);
 
-dword addHeapCommon(unsigned int maxSize, unsigned int base = 0);
+unsigned int addHeapCommon(unsigned int maxSize, unsigned int base = 0);
 
 void syscall();
 void linuxSyenter();
 void windowsSysenter();
 
-void makeImportLabel(dword addr, dword val);
+void makeImportLabel(unsigned int addr, unsigned int val);
 void saveModuleList(Buffer &b);
 void loadModuleList(Buffer &b);
 void saveModuleData(Buffer &b);
@@ -230,55 +230,55 @@ void loadModuleData(Buffer &b);
 
 struct HandleNode {
    char *moduleName;
-   dword handle;
-   dword id;
-   dword maxAddr;
-   dword ordinal_base;
-   dword NoF;  //NumberOfFunctions
-   dword NoN;  //NumberOfNames
-   dword eat;  //AddressOfFunctions  export address table
-   dword ent;  //AddressOfNames      export name table
-   dword eot;  //AddressOfNameOrdinals  export ordinal table
+   unsigned int handle;
+   unsigned int id;
+   unsigned int maxAddr;
+   unsigned int ordinal_base;
+   unsigned int NoF;  //NumberOfFunctions
+   unsigned int NoN;  //NumberOfNames
+   unsigned int eat;  //AddressOfFunctions  export address table
+   unsigned int ent;  //AddressOfNames      export name table
+   unsigned int eot;  //AddressOfNameOrdinals  export ordinal table
    HandleNode *next;
 };
 
-dword getHandle(HandleNode *m);
-dword getModuleEnd(dword handle);
-dword getId(HandleNode *m);
+unsigned int getHandle(HandleNode *m);
+unsigned int getModuleEnd(unsigned int handle);
+unsigned int getId(HandleNode *m);
 HandleNode *addModule(const char *mod, bool loading, int id, bool addToPeb = true);
-void addModuleToPeb(dword handle, const char *name, bool loading = false);
-void addModuleToPeb(HandleNode *hn, bool loading, dword unicodeName = 0);
-HandleNode *addNewModuleNode(const char *mod, dword h, dword id);
+void addModuleToPeb(unsigned int handle, const char *name, bool loading = false);
+void addModuleToPeb(HandleNode *hn, bool loading, unsigned int unicodeName = 0);
+HandleNode *addNewModuleNode(const char *mod, unsigned int h, unsigned int id);
 
-hookfunc checkForHook(char *funcName, dword funcAddr, dword moduleId);
-void doImports(dword import_drectory, dword size, dword image_base);
+hookfunc checkForHook(char *funcName, unsigned int funcAddr, unsigned int moduleId);
+void doImports(unsigned int import_drectory, unsigned int size, unsigned int image_base);
 void doImports(PETables &pe);
-bool isModuleAddress(dword addr);
-char *reverseLookupExport(dword addr);
+bool isModuleAddress(unsigned int addr);
+char *reverseLookupExport(unsigned int addr);
 
 FunctionInfo *getFunctionInfo(const char *name);
 void clearFunctionInfoList(void);
-void addFunctionInfo(const char *name, dword result, dword nitems, dword callType);
+void addFunctionInfo(const char *name, unsigned int result, unsigned int nitems, unsigned int callType);
 void saveFunctionInfo(Buffer &b);
 void loadFunctionInfo(Buffer &b);
 char *getFunctionPrototype(FunctionInfo *f);
 char *getFunctionReturnType(FunctionInfo *f);
 
-char *getString(dword addr);
+char *getString(unsigned int addr);
 void init_til(const char *tilFile);
 
 typedef void (*unemulatedCB)(unsigned int addr, const char *name);
 
 void setUnemulatedCB(unemulatedCB cb);
 
-dword myGetProcAddress(dword hModule, dword lpProcName);
-dword myGetProcAddress(dword hModule, const char *procName);
-dword myGetModuleHandle(const char *modName);
+unsigned int myGetProcAddress(unsigned int hModule, unsigned int lpProcName);
+unsigned int myGetProcAddress(unsigned int hModule, const char *procName);
+unsigned int myGetModuleHandle(const char *modName);
 
 typedef enum {NEVER, ASK, ALWAYS} emu_Actions;
 
 extern int emu_alwaysLoadLibrary;
 extern int emu_alwaysGetModuleHandle;
-extern dword pCmdLineA;
+extern unsigned int pCmdLineA;
 
 #endif

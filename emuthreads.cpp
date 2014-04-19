@@ -40,15 +40,15 @@ ThreadNode *activeThread = NULL;
 /*
  * Figure out a new, unused thread id to assign to the new thread
  */
-dword getNewThreadHandle() {
+unsigned int getNewThreadHandle() {
    return threadList ? (threadList->handle + 4) : THREAD_HANDLE_BASE;  
 }
 
 /*
  * Figure out a new, unused thread id to assign to the new thread
  */
-dword getNewThreadId() {
-   dword tid = 0;
+unsigned int getNewThreadId() {
+   unsigned int tid = 0;
    do {
       getRandomBytes(&tid, 2);
       tid = (tid % 3000) + 1000;
@@ -69,11 +69,11 @@ dword getNewThreadId() {
  * Should really rewrite to allocate space from emulation heap.
  * Should also look for holes created by destroyed threads
  */
-dword getNewStackLocation() {
+unsigned int getNewStackLocation() {
    int count = 1;
    char buf[16];
    segment_t *s = get_segm_by_name(".stack");
-   dword top = (dword)s->endEA + 0xFFFF;
+   unsigned int top = (unsigned int)s->endEA + 0xFFFF;
    while (getseg(top)) {
       top += 0x10000;
       count++;
@@ -96,7 +96,7 @@ ThreadNode::ThreadNode() {
    next = NULL;
 }
 
-ThreadNode::ThreadNode(dword threadFunc, dword threadArg) {
+ThreadNode::ThreadNode(unsigned int threadFunc, unsigned int threadArg) {
    next = NULL;
    id = getNewThreadId();
    handle = getNewThreadHandle();
@@ -106,15 +106,15 @@ ThreadNode::ThreadNode(dword threadFunc, dword threadArg) {
    this->threadArg = threadArg;
    
    //create thread stack
-   dword top;
+   unsigned int top;
    regs.general[ESP] = top = getNewStackLocation();
    //the rest should really only be done for Windows binaries
    if (usingSEH()) {
       char buf[32];
-      dword teb = get_long(fsBase + TEB_LINEAR_ADDR);
-      dword peb = get_long(teb + TEB_PEB_PTR);
-      dword newTeb = 0x7ffdf000;
-      dword prev;
+      unsigned int teb = get_long(fsBase + TEB_LINEAR_ADDR);
+      unsigned int peb = get_long(teb + TEB_PEB_PTR);
+      unsigned int newTeb = 0x7ffdf000;
+      unsigned int prev;
       do {
          prev = newTeb;
          if (newTeb == peb || newTeb == fsBase) {
@@ -144,7 +144,7 @@ ThreadNode::ThreadNode(dword threadFunc, dword threadArg) {
    }
 }
 
-ThreadNode::ThreadNode(Buffer &b, dword /*currentActive*/) {
+ThreadNode::ThreadNode(Buffer &b, unsigned int /*currentActive*/) {
    next = NULL;
    b.read((char*)&handle, sizeof(handle));
    b.read((char*)&id, sizeof(id));
@@ -164,7 +164,7 @@ void ThreadNode::save(Buffer &b, bool /*saveStack*/) {
 /*
  * return thread handle for new thread
  */
-ThreadNode *emu_create_thread(dword threadFunc, dword threadArg) {
+ThreadNode *emu_create_thread(unsigned int threadFunc, unsigned int threadArg) {
    ThreadNode *tn = new ThreadNode(threadFunc, threadArg);
    tn->next = threadList;
    threadList = tn;
@@ -176,7 +176,7 @@ ThreadNode *emu_create_thread(dword threadFunc, dword threadArg) {
  * prevent destruction of the main thread
  * return the next thread to run (currently always the main thread)
  */
-ThreadNode *emu_destroy_thread(dword threadId) {
+ThreadNode *emu_destroy_thread(unsigned int threadId) {
    ThreadNode *prev = NULL;
    ThreadNode *tn = NULL, *mainThread = NULL;
    for (tn = threadList; tn; tn = tn->next) {
@@ -236,7 +236,7 @@ void emu_switch_threads(ThreadNode *new_thread) {
 /*
  * locate the thread with the given handle
  */
-ThreadNode *findThread(dword handle) {
+ThreadNode *findThread(unsigned int handle) {
    for (ThreadNode *tn = threadList; tn; tn = tn->next) {
       if (tn->handle == handle) return tn;
    }

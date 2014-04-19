@@ -1,3 +1,8 @@
+* 4/15/14
+  Fixed issues with "Set Memory" asociated with conversion of QTextField contents to 
+  ascii strings. Basic implementation for memory access faults. Added menu option to
+  make pause on exception optional. Fixed bug in emulation of LAHF.
+
 * 1/4/14
   Updated for compatibility with Ida 6.5 SDK. Visual Studio builds (Ida <= 5.7) now use
   VS 2010+. Added color highlighting for register changes while stepping.

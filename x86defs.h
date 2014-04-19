@@ -25,13 +25,8 @@
 #ifndef WIN32
 
 #include <sys/types.h>
-typedef int64_t quad;
-typedef u_int64_t uquad;
 
 #else   //WIN32
-
-typedef __int64 quad;
-typedef unsigned __int64 uquad;
 
 typedef unsigned char u_int8_t;
 typedef unsigned short u_int16_t;
@@ -39,10 +34,6 @@ typedef unsigned int u_int32_t;
 typedef int int32_t;
 
 #endif  //WIN32
-
-typedef unsigned int   uint;
-typedef unsigned short ushort;
-typedef unsigned char  uchar;
 
 // Use printf instead of msg when not using Ida
 #define msg printf
@@ -92,9 +83,6 @@ typedef unsigned char  uchar;
 #include <bytes.hpp>
 #include <netnode.hpp>
 
-typedef long long quad;
-typedef unsigned long long uquad;
-
 typedef unsigned char u_int8_t;
 typedef unsigned short u_int16_t;
 typedef unsigned int u_int32_t;
@@ -106,11 +94,6 @@ extern netnode x86emu_node;
 extern netnode kernel_node;
 
 #endif
-
-typedef uchar  byte;
-typedef ushort word;
-typedef uint   dword;
-typedef uquad  qword;
 
 union ll_union {
    unsigned long long ll;
@@ -365,7 +348,7 @@ union ll_union {
 */
 #define fpuStackTop ((fpu.status >> 11) & 7)
 
-void getSystemBaseTime(dword *timeLow, dword *timeHigh);
+void getSystemBaseTime(unsigned int *timeLow, unsigned int *timeHigh);
 void getRandomBytes(void *buf, unsigned int len);
 
 extern bool doTrace;
@@ -489,10 +472,10 @@ void traceLog(char *entry);
 void closeTrace();
 void openTraceFile();
 void setTitle();
-void updateRegister(int r, dword val);
+void updateRegister(int r, unsigned int val);
 void forceCode();
 void codeCheck(void);
-dword parseNumber(char *numb);
+unsigned int parseNumber(char *numb);
 void dumpRange();
 bool isStringPointer(const char *type_str);
 void skip();
@@ -508,11 +491,11 @@ unsigned int *getRegisterPointer(int reg);
 unsigned int getRegisterValue(int reg);
 void setRegisterValue(int reg, unsigned int val);
 void pushData();
-void dumpRange(dword low, dword hi);
+void dumpRange(unsigned int low, unsigned int hi);
 void dumpEmbededPE();
 void switchThread(int tidx);
 void destroyThread(int tidx);
-void memLoadFile(dword start);
+void memLoadFile(unsigned int start);
 void dumpHeap();
 void doReset();
 void jumpToCursor();
@@ -532,7 +515,8 @@ void generateArgList(const char *func, argcallback_t cb, void *user);
 void buildMainArgs();
 void buildWinMainArgs();
 void buildDllMainArgs();
-void formatStack(dword begin, dword end);
+void formatStack(unsigned int begin, unsigned int end);
+void setBreakOnExceptions(bool doBreak);
 
 bool loadLibrary();
 

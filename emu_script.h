@@ -20,6 +20,17 @@
 #ifndef __EMU_SCRIPT_H
 #define __EMU_SCRIPT_H
 
+/* add IDC functions for interacting with the emulator
+  EmuRun();
+  EmuTrace();
+  EmuStepOne();
+  EmuTraceOne();
+  EmuSync();
+  EmuGetReg(regno);
+  EmuSetReg(regno, value);
+  EmuAddBpt(addr);
+*/
+
 #define EAX_REG 0
 #define ECX_REG 1
 #define EDX_REG 2

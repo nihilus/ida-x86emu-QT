@@ -60,16 +60,16 @@
 #define SEGMOD_KEEP 0
 #endif
 
-void addVectoredExceptionHandler(bool first, dword handler);
-void removeVectoredExceptionHandler(dword handler);
+void addVectoredExceptionHandler(bool first, unsigned int handler);
+void removeVectoredExceptionHandler(unsigned int handler);
 
 #define FAKE_HANDLE_BASE 0x80000000
 
 extern HWND x86Dlg;
 
 struct FakedImport {
-   dword handle;  //module handle the lookup was performed on
-   dword addr;    //returned fake import address
+   unsigned int handle;  //module handle the lookup was performed on
+   unsigned int addr;    //returned fake import address
    char *name;    //name assigned to this function
    FakedImport *next;
 };
@@ -78,14 +78,14 @@ static HandleNode *moduleHead = NULL;
 static FunctionInfo *functionInfoList = NULL;
 
 static FakedImport *fakedImportList = NULL;
-//static dword fakedImportAddr = 1;
+//static unsigned int fakedImportAddr = 1;
 
 //stick dummy values up in kernel space to distinguish them from
 //actual library handles
-static dword moduleHandle = FAKE_HANDLE_BASE;    
+static unsigned int moduleHandle = FAKE_HANDLE_BASE;    
 
 //persistant module identifier
-static dword moduleId = 0x10000;
+static unsigned int moduleId = 0x10000;
 
 static unemulatedCB unemulated_cb = NULL;
 
@@ -94,7 +94,7 @@ typedef enum {R_FAKE = -1, R_NO = 0, R_YES = 1} Reply;
 int emu_alwaysLoadLibrary = ASK;
 int emu_alwaysGetModuleHandle = ASK;
 
-dword pCmdLineA;
+unsigned int pCmdLineA;
 
 //pointer to til we use to extract function info
 til_t *ti = NULL;
@@ -269,7 +269,7 @@ HookEntry hookTable[] = {
    {NULL, NULL}
 };
 
-void setThreadError(dword err) {
+void setThreadError(unsigned int err) {
    writeDword(fsBase + TEB_LAST_ERROR, err);
 }
 
@@ -308,13 +308,13 @@ HandleNode *findModuleByName(const char *h) {
    return hl;
 }
 
-dword myGetModuleHandle(const char *modName) {
+unsigned int myGetModuleHandle(const char *modName) {
    HandleNode *h = findModuleByName(modName);
    if (h == NULL) return 0xFFFFFFFF;
    return h->handle;
 }
 
-HandleNode *findModuleByHandle(dword handle) {
+HandleNode *findModuleByHandle(unsigned int handle) {
    HandleNode *hl;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (hl->handle == handle) break;
@@ -326,13 +326,13 @@ HandleNode *findModuleByHandle(dword handle) {
 //return the end address of a loaded module
 //useful to deconflict in the case we loaded module headers only
 //return module end address or 0xffffffff for invalid handle
-dword getModuleEnd(dword handle) {
+unsigned int getModuleEnd(unsigned int handle) {
    HandleNode *hl;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (hl->handle == handle) break;
    }
    if (hl) {
-      dword nt = handle + get_long(handle + 0x3C); //e_lfanew
+      unsigned int nt = handle + get_long(handle + 0x3C); //e_lfanew
       return handle + get_long(nt + 0x50); //nt.OptionalHeader.SizeOfImage
    }
    return 0xffffffff;
@@ -360,7 +360,7 @@ IMAGE_NT_HEADERS *getPEHeader(HMODULE mod) {
 */
 
 //find an existing faked import
-FakedImport *findFakedImportByAddr(HandleNode *mod, dword addr) {
+FakedImport *findFakedImportByAddr(HandleNode *mod, unsigned int addr) {
    FakedImport *ff = NULL;
    for (ff = fakedImportList; ff; ff = ff->next) {
       if (ff->handle == mod->handle && ff->addr == addr) break;
@@ -427,16 +427,16 @@ typedef struct _UNICODE_STRING {
 #define BASE_ADDRESS_OFFSET 24
 #define BASE_NAME_OFFSET 44
 
-dword getModuleBase(dword ldrModule) {
+unsigned int getModuleBase(unsigned int ldrModule) {
    return get_long(ldrModule + BASE_ADDRESS_OFFSET);
 }
 
-void insertTail(dword listHead, dword mod, int doff) {
+void insertTail(unsigned int listHead, unsigned int mod, int doff) {
 //   msg("Insert tail called to add %x to %x\n", mod, listHead);
-   dword handle = getModuleBase(mod);
-   dword modFlink = mod + 24 - doff;
-   dword blink = listHead;
-   dword flink;
+   unsigned int handle = getModuleBase(mod);
+   unsigned int modFlink = mod + 24 - doff;
+   unsigned int blink = listHead;
+   unsigned int flink;
    for (flink = get_long(listHead); 
         flink != listHead; 
         flink = get_long(flink)) {
@@ -450,13 +450,13 @@ void insertTail(dword listHead, dword mod, int doff) {
    patch_long(listHead + 4, modFlink);  //link back to mod
 }
 
-void insertHead(dword listHead, dword mod, int doff) {
+void insertHead(unsigned int listHead, unsigned int mod, int doff) {
 //   msg("Insert head called to add %x to %x\n", mod, listHead);
-   dword handle = getModuleBase(mod);
+   unsigned int handle = getModuleBase(mod);
 //   msg("handle is %x mod is %x\n", handle, mod);
-   dword modFlink = mod + 24 - doff;
+   unsigned int modFlink = mod + 24 - doff;
 //   msg("modFlink is %x\n", modFlink);
-   dword flink;
+   unsigned int flink;
 //   msg("listHead is %x\n", listHead);
    for (flink = get_long(listHead); 
         flink != listHead; 
@@ -465,23 +465,23 @@ void insertHead(dword listHead, dword mod, int doff) {
       if (get_long(flink + doff) == handle) return; //already in list
    }
    flink = get_long(listHead);
-   /*dword back =*/ get_long(flink + 4);
+   /*unsigned int back =*/ get_long(flink + 4);
    patch_long(flink + 4, modFlink);
    patch_long(modFlink + 4, listHead);  //point mod back to head
    patch_long(modFlink, flink);  //point mod fwd to former head
    patch_long(listHead, modFlink);  //link fwd to mod
 }
 
-void insertInOrder(dword listHead, dword mod, int doff) {
+void insertInOrder(unsigned int listHead, unsigned int mod, int doff) {
 //   msg("Insert in order called to add %x to %x\n", mod, listHead);
-   dword handle = getModuleBase(mod);
-   dword modFlink = mod + 24 - doff;
-   dword blink = listHead;
-   dword flink;
+   unsigned int handle = getModuleBase(mod);
+   unsigned int modFlink = mod + 24 - doff;
+   unsigned int blink = listHead;
+   unsigned int flink;
    for (flink = get_long(listHead); 
         flink != listHead; 
         flink = get_long(flink)) {
-      dword modBase = get_long(flink + doff);
+      unsigned int modBase = get_long(flink + doff);
       if (modBase == handle) return; //already in list
       if (modBase > handle) break; //insert before this
       blink = flink;
@@ -494,8 +494,8 @@ void insertInOrder(dword listHead, dword mod, int doff) {
    patch_long(flink + 4, modFlink);  //link fwd to mod
 }
 
-bool containsModule(dword listHead, dword mod, int doff) {
-   for (dword flink = get_long(listHead); 
+bool containsModule(unsigned int listHead, unsigned int mod, int doff) {
+   for (unsigned int flink = get_long(listHead); 
         flink != listHead; 
         flink = get_long(flink)) {
       if (get_long(flink + doff) == mod) return true; //already in list
@@ -503,8 +503,8 @@ bool containsModule(dword listHead, dword mod, int doff) {
    return false;
 }
 
-bool cmp_c_to_dbuni(char *cstr, dword uni) {
-   dword ustr = get_long(uni + 4);
+bool cmp_c_to_dbuni(char *cstr, unsigned int uni) {
+   unsigned int ustr = get_long(uni + 4);
    if (ustr) {
       do {
          char ch = *cstr++;
@@ -517,10 +517,10 @@ bool cmp_c_to_dbuni(char *cstr, dword uni) {
    return false;
 }
 
-dword allocateUnicodeString(const char *str) {
+unsigned int allocateUnicodeString(const char *str) {
    int len = strlen(str);
-   dword ustr = HeapBase::getHeap()->malloc(len * 2 + 2);
-   dword uni = HeapBase::getHeap()->malloc(8);  //sizeof(UNICODE_STRING)
+   unsigned int ustr = HeapBase::getHeap()->malloc(len * 2 + 2);
+   unsigned int uni = HeapBase::getHeap()->malloc(8);  //sizeof(UNICODE_STRING)
 
    patch_word(uni, len * 2);
    patch_word(uni + 2, len * 2 + 2);
@@ -532,14 +532,14 @@ dword allocateUnicodeString(const char *str) {
    return uni;
 }
 
-dword findPebModuleByName(char *name) {
+unsigned int findPebModuleByName(char *name) {
    segment_t *s = get_segm_by_name(".peb");
    if (s) { 
-      dword peb = (dword)s->startEA;
-      dword pebLdr = get_long(peb + 0xC);
-      dword list = pebLdr + 0xC;
-      dword blink = list;
-      dword flink;
+      unsigned int peb = (unsigned int)s->startEA;
+      unsigned int pebLdr = get_long(peb + 0xC);
+      unsigned int list = pebLdr + 0xC;
+      unsigned int blink = list;
+      unsigned int flink;
       for (flink = get_long(list); 
            flink != list; 
            flink = get_long(flink)) {
@@ -549,22 +549,22 @@ dword findPebModuleByName(char *name) {
          blink = flink;
       }
    }
-   return (dword)BADADDR;
+   return (unsigned int)BADADDR;
 }
 
-void addModuleToPeb(dword handle, const char *name, bool loading) {
+void addModuleToPeb(unsigned int handle, const char *name, bool loading) {
    segment_t *s = get_segm_by_name(".peb");
    if (s) {
       msg("adding %s (%x) to PEB\n", name, handle);
-      dword peb = (dword)s->startEA;
-      dword pebLdr = get_long(peb + 0xC);
+      unsigned int peb = (unsigned int)s->startEA;
+      unsigned int pebLdr = get_long(peb + 0xC);
 
-      dword uni = allocateUnicodeString(name);
+      unsigned int uni = allocateUnicodeString(name);
       msg("mod name allocated at %x\n", uni);
 
       //mod is the address of the LDR_MODULE that we are allocating
-      dword mod = HeapBase::getHeap()->malloc(LDR_MODULE_SIZE);
-      dword pe = handle + get_long(handle + 0x3C);
+      unsigned int mod = HeapBase::getHeap()->malloc(LDR_MODULE_SIZE);
+      unsigned int pe = handle + get_long(handle + 0x3C);
       msg("mod allocated at %x\n", mod);
       patch_long(mod + BASE_ADDRESS_OFFSET, handle);  //BaseAddress
       patch_long(mod + BASE_ADDRESS_OFFSET + 4, handle + get_long(pe + 0x28)); //EntryPoint
@@ -578,13 +578,13 @@ void addModuleToPeb(dword handle, const char *name, bool loading) {
 //      patch_long(mod + 60, 0);  //HashTableEntry
 //      patch_long(mod + 68, 0);  //TimeDateStamp
       
-      dword loadOrder = pebLdr + 0xC;
+      unsigned int loadOrder = pebLdr + 0xC;
       msg("addModuleToPeb containsModule\n");
       if (containsModule(loadOrder, handle, 24)) return;
       msg("addModuleToPeb containsModule complete\n");
 
-      dword memoryOrder = pebLdr + 0x14;
-      dword initOrder = pebLdr + 0x1C;
+      unsigned int memoryOrder = pebLdr + 0x14;
+      unsigned int initOrder = pebLdr + 0x1C;
       if (loading) {
          insertHead(initOrder, mod, 8);
       }
@@ -601,12 +601,12 @@ void addModuleToPeb(dword handle, const char *name, bool loading) {
    }
 }
 
-void addModuleToPeb(HandleNode *hn, bool loading, dword uni) {
+void addModuleToPeb(HandleNode *hn, bool loading, unsigned int uni) {
    segment_t *s = get_segm_by_name(".peb");
    if (s) {
       msg("adding %s (%x) to PEB\n", hn->moduleName, hn->handle);
-      dword peb = (dword)s->startEA;
-      dword pebLdr = get_long(peb + 0xC);
+      unsigned int peb = (unsigned int)s->startEA;
+      unsigned int pebLdr = get_long(peb + 0xC);
 
       if (uni == 0) {
          uni = allocateUnicodeString(hn->moduleName);
@@ -614,9 +614,9 @@ void addModuleToPeb(HandleNode *hn, bool loading, dword uni) {
       msg("mod name allocated at %x\n", uni);
 
       //mod is the address of the LDR_MODULE that we are allocating
-      dword mod = HeapBase::getHeap()->malloc(LDR_MODULE_SIZE);
+      unsigned int mod = HeapBase::getHeap()->malloc(LDR_MODULE_SIZE);
 
-      dword pe = hn->handle + get_long(hn->handle + 0x3C);
+      unsigned int pe = hn->handle + get_long(hn->handle + 0x3C);
       msg("mod allocated at %x\n", mod);
       patch_long(mod + BASE_ADDRESS_OFFSET, hn->handle);  //BaseAddress
       patch_long(mod + BASE_ADDRESS_OFFSET + 4, hn->handle + get_long(pe + 0x28)); //EntryPoint
@@ -630,13 +630,13 @@ void addModuleToPeb(HandleNode *hn, bool loading, dword uni) {
 //      patch_long(mod + 60, 0);  //HashTableEntry
 //      patch_long(mod + 68, 0);  //TimeDateStamp
       
-      dword loadOrder = pebLdr + 0xC;
+      unsigned int loadOrder = pebLdr + 0xC;
       msg("addModuleToPeb containsModule\n");
       if (containsModule(loadOrder, hn->handle, 24)) return;
       msg("addModuleToPeb containsModule complete\n");
 
-      dword memoryOrder = pebLdr + 0x14;
-      dword initOrder = pebLdr + 0x1C;
+      unsigned int memoryOrder = pebLdr + 0x14;
+      unsigned int initOrder = pebLdr + 0x1C;
       if (loading) {
          insertHead(initOrder, mod, 8);
       }
@@ -721,20 +721,20 @@ int getSystemDllDirectory(char *dir, int size) {
    return len;
 }
 
-dword getHandle(HandleNode *m) {
+unsigned int getHandle(HandleNode *m) {
    return m->handle;
 }
 
-dword getId(HandleNode *m) {
+unsigned int getId(HandleNode *m) {
    return m->id;
 }
 
-HandleNode *addNewModuleNode(const char *mod, dword h, dword id) {
+HandleNode *addNewModuleNode(const char *mod, unsigned int h, unsigned int id) {
    HandleNode *m = (HandleNode*) calloc(1, sizeof(HandleNode));
    m->next = moduleHead;
    moduleHead = m;
    m->moduleName = _strdup(mod);
-   m->handle = (dword) h;
+   m->handle = (unsigned int) h;
    if (h & FAKE_HANDLE_BASE) {
       //faked module with no loaded export table
       m->maxAddr = h + 1;
@@ -743,10 +743,10 @@ HandleNode *addNewModuleNode(const char *mod, dword h, dword id) {
       m->id = id ? id : moduleId;
       moduleId += 0x10000;
 
-      dword pe_addr = m->handle + get_long(0x3C + m->handle);  //dos.e_lfanew
+      unsigned int pe_addr = m->handle + get_long(0x3C + m->handle);  //dos.e_lfanew
       m->maxAddr = m->handle + get_long(pe_addr + 0x18 + 0x38); //nt.OptionalHeader.SizeOfImage
 
-      dword export_dir = m->handle + get_long(pe_addr + 0x18 + 0x60 + 0x0);  //export dir RVA
+      unsigned int export_dir = m->handle + get_long(pe_addr + 0x18 + 0x60 + 0x0);  //export dir RVA
  
       m->ordinal_base = get_long(export_dir + 0x10);   //ed.Base
 
@@ -764,8 +764,8 @@ HandleNode *addModule(const char *mod, bool loading, int id, bool addToPeb) {
    msg("x86emu: addModule called for %s\n", mod);
    HandleNode *m = findModuleByName(mod);
    if (m == NULL) {
-      dword h = 0;
-      dword len;
+      unsigned int h = 0;
+      unsigned int len;
 
       char module_name[260];
       if ((id & FAKE_HANDLE_BASE) != 0) {
@@ -855,7 +855,7 @@ void loadModuleList(Buffer &b) {
    int n;
    b.read((char*)&n, sizeof(n));
    for (int i = 0; i < n; i++) {
-      dword id, tempid;
+      unsigned int id, tempid;
       char *name;
       b.read((char*)&id, sizeof(id));
       tempid = id & ~FAKE_HANDLE_BASE;
@@ -875,7 +875,7 @@ void saveModuleList(Buffer &b) {
    for (HandleNode *p = moduleHead; p; p = p->next) n++;
    b.write((char*)&n, sizeof(n));
    for (HandleNode *m = moduleHead; m; m = m->next) {
-      dword moduleId = m->id | (m->handle & FAKE_HANDLE_BASE); //set high bit of id if using fake handle
+      unsigned int moduleId = m->id | (m->handle & FAKE_HANDLE_BASE); //set high bit of id if using fake handle
       b.write((char*)&moduleId, sizeof(moduleId));
       b.writeString(m->moduleName);
    }
@@ -946,22 +946,22 @@ void saveModuleData(Buffer &b) {
  * until a NULL is encountered.  Returned value must be free'd
  */
 
-char *getString(dword addr) {
+char *getString(unsigned int addr) {
    int size = 16;
    int i = 0;
-   byte *str = NULL, ch;
-   str = (byte*) malloc(size);
+   unsigned char *str = NULL, ch;
+   str = (unsigned char*) malloc(size);
    if (addr) {
       while ((ch = get_byte(addr++)) != 0) {
          if (i == size) {
-            str = (byte*)realloc(str, size + 16);
+            str = (unsigned char*)realloc(str, size + 16);
             size += 16;
          }
          if (ch == 0xFF) break;  //should be ascii, something wrong here
          str[i++] = ch;
       }
       if (i == size) {
-         str = (byte*)realloc(str, size + 1);
+         str = (unsigned char*)realloc(str, size + 1);
       }
    }
    str[i] = 0;
@@ -974,16 +974,16 @@ char *getString(dword addr) {
  * until a NULL is encountered.  Returned value must be free'd
  */
 
-char *getStringW(dword addr) {
+char *getStringW(unsigned int addr) {
    int size = 16;
    int i = 0;
-   byte *str = NULL;
+   unsigned char *str = NULL;
    short ch;
-   str = (byte*) malloc(size);
+   str = (unsigned char*) malloc(size);
    if (addr) {
       while ((ch = get_word(addr)) != 0) {
          if (i == size) {
-            str = (byte*)realloc(str, size + 16);
+            str = (unsigned char*)realloc(str, size + 16);
             size += 16;
          }
          if (ch == 0xFF) break;  //should be ascii, something wrong here
@@ -991,7 +991,7 @@ char *getStringW(dword addr) {
          addr += 2;
       }
       if (i == size) {
-         str = (byte*)realloc(str, size + 1);
+         str = (unsigned char*)realloc(str, size + 1);
       }
    }
    str[i] = 0;
@@ -1009,7 +1009,7 @@ void setUnemulatedCB(unemulatedCB cb) {
 /*
  * This function is used for all unemulated API functions
  */
-void unemulated(dword addr) {
+void unemulated(unsigned int addr) {
    if (unemulated_cb) {
       HookNode *n = findHookByAddr(addr);
       (*unemulated_cb)(addr, n ? n->getName() : NULL);
@@ -1026,7 +1026,7 @@ void unemulated(dword addr) {
    get right at their parameters on top of the stack.
 */
 
-void emu_GetCommandLineA(dword /*addr*/) {
+void emu_GetCommandLineA(unsigned int /*addr*/) {
    eax = pCmdLineA;
    if (doLogLib) {
       msg("call: GetCommandLineA() = 0x%x\n", eax);
@@ -1035,7 +1035,7 @@ void emu_GetCommandLineA(dword /*addr*/) {
 
 //*** this needs more work
 //common core for GetStartupInfoX
-void emu_GetStartupInfo(dword lpStartupInfo, dword pp) {
+void emu_GetStartupInfo(unsigned int lpStartupInfo, unsigned int pp) {
    patch_long(lpStartupInfo, 0x44);   //cb = sizeof(STARTUPINFO)
 
    patch_long(lpStartupInfo + 4, 0);   //lpReserved
@@ -1050,11 +1050,11 @@ void emu_GetStartupInfo(dword lpStartupInfo, dword pp) {
    patch_long(lpStartupInfo + 0x40, get_long(pp + 0x20));   //hStdError
 }
 
-void emu_GetStartupInfoA(dword /*addr*/) {
+void emu_GetStartupInfoA(unsigned int /*addr*/) {
    //this can raise an exception, but which one?
-   dword lpStartupInfo = pop(SIZE_DWORD);
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+   unsigned int lpStartupInfo = pop(SIZE_DWORD);
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pp = readDword(peb + PEB_PROCESS_PARMS);
 
    patch_long(lpStartupInfo + 8, get_long(pp + SIZEOF_PROCESS_PARAMETERS + 4));   //DesktopInfo
    patch_long(lpStartupInfo + 12, get_long(pp + SIZEOF_PROCESS_PARAMETERS));   //WindowTitle
@@ -1065,10 +1065,10 @@ void emu_GetStartupInfoA(dword /*addr*/) {
    }
 }
 
-void emu_GetStartupInfoW(dword /*addr*/) {
-   dword lpStartupInfo = pop(SIZE_DWORD);
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+void emu_GetStartupInfoW(unsigned int /*addr*/) {
+   unsigned int lpStartupInfo = pop(SIZE_DWORD);
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pp = readDword(peb + PEB_PROCESS_PARMS);
 
    patch_long(lpStartupInfo + 8, get_long(pp + 0x7C));   //DesktopInfo
    patch_long(lpStartupInfo + 12, get_long(pp + 0x74));   //WindowTitle
@@ -1078,11 +1078,11 @@ void emu_GetStartupInfoW(dword /*addr*/) {
    }
 }
 
-void emu_GetLocaleInfoA(dword /*addr*/) {
-   dword Locale = pop(SIZE_DWORD);
-   dword LCType = pop(SIZE_DWORD);
-   dword lpLCData = pop(SIZE_DWORD);
-   dword cchData = pop(SIZE_DWORD);
+void emu_GetLocaleInfoA(unsigned int /*addr*/) {
+   unsigned int Locale = pop(SIZE_DWORD);
+   unsigned int LCType = pop(SIZE_DWORD);
+   unsigned int lpLCData = pop(SIZE_DWORD);
+   unsigned int cchData = pop(SIZE_DWORD);
 
    eax = 1;
    switch (Locale) {
@@ -1150,11 +1150,11 @@ void emu_GetLocaleInfoA(dword /*addr*/) {
    }
 }
 
-void emu_GetLocaleInfoW(dword /*addr*/) {
-   dword Locale = pop(SIZE_DWORD);
-   dword LCType = pop(SIZE_DWORD);
-   dword lpLCData = pop(SIZE_DWORD);
-   dword cchData = pop(SIZE_DWORD);
+void emu_GetLocaleInfoW(unsigned int /*addr*/) {
+   unsigned int Locale = pop(SIZE_DWORD);
+   unsigned int LCType = pop(SIZE_DWORD);
+   unsigned int lpLCData = pop(SIZE_DWORD);
+   unsigned int cchData = pop(SIZE_DWORD);
 
    eax = 1;
    switch (Locale) {
@@ -1240,15 +1240,15 @@ static char wcmbdata[] =
    "\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf0"
    "\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff";
 
-void emu_WideCharToMultiByte(dword /*addr*/) {
-   dword CodePage = pop(SIZE_DWORD);
-   dword dwFlags = pop(SIZE_DWORD);   //*** update, don't ignore this
-   dword lpWideCharStr = pop(SIZE_DWORD);
-   dword cchWideChar = pop(SIZE_DWORD);
-   dword lpMultiByteStr = pop(SIZE_DWORD);
-   dword cbMultiByte = pop(SIZE_DWORD);
-   dword lpDefaultChar = pop(SIZE_DWORD);  //*** update, don't ignore this
-   dword lpUsedDefaultChar = pop(SIZE_DWORD);  //*** update, don't ignore this
+void emu_WideCharToMultiByte(unsigned int /*addr*/) {
+   unsigned int CodePage = pop(SIZE_DWORD);
+   unsigned int dwFlags = pop(SIZE_DWORD);   //*** update, don't ignore this
+   unsigned int lpWideCharStr = pop(SIZE_DWORD);
+   unsigned int cchWideChar = pop(SIZE_DWORD);
+   unsigned int lpMultiByteStr = pop(SIZE_DWORD);
+   unsigned int cbMultiByte = pop(SIZE_DWORD);
+   unsigned int lpDefaultChar = pop(SIZE_DWORD);  //*** update, don't ignore this
+   unsigned int lpUsedDefaultChar = pop(SIZE_DWORD);  //*** update, don't ignore this
 
    if (lpWideCharStr == lpMultiByteStr || cchWideChar == 0) {
       eax = 0;
@@ -1273,7 +1273,7 @@ void emu_WideCharToMultiByte(dword /*addr*/) {
                eax = cchWideChar;
             }
             else {
-               dword i;
+               unsigned int i;
                for (i = 0; i < cchWideChar; i++) {
                   unsigned short ch = get_word(lpWideCharStr + i * 2);
                   if (ch > 255) {
@@ -1335,13 +1335,13 @@ static const unsigned short *mbwcdata = (const unsigned short *)
    "\xf1\x00\xf2\x00\xf3\x00\xf4\x00\xf5\x00\xf6\x00\xf7\x00\xf8\x00"
    "\xf9\x00\xfa\x00\xfb\x00\xfc\x00\xfd\x00\xfe\x00\xff\x00";
    
-void emu_MultiByteToWideChar(dword /*addr*/) {
-   dword CodePage = pop(SIZE_DWORD);
-   dword dwFlags = pop(SIZE_DWORD);
-   dword lpMultiByteStr = pop(SIZE_DWORD);
-   dword cbMultiByte = pop(SIZE_DWORD);
-   dword lpWideCharStr = pop(SIZE_DWORD);
-   dword cchWideChar = pop(SIZE_DWORD);
+void emu_MultiByteToWideChar(unsigned int /*addr*/) {
+   unsigned int CodePage = pop(SIZE_DWORD);
+   unsigned int dwFlags = pop(SIZE_DWORD);
+   unsigned int lpMultiByteStr = pop(SIZE_DWORD);
+   unsigned int cbMultiByte = pop(SIZE_DWORD);
+   unsigned int lpWideCharStr = pop(SIZE_DWORD);
+   unsigned int cchWideChar = pop(SIZE_DWORD);
 
    if (lpWideCharStr == lpMultiByteStr || cbMultiByte == 0) {
       eax = 0;
@@ -1366,7 +1366,7 @@ void emu_MultiByteToWideChar(dword /*addr*/) {
                eax = cbMultiByte;
             }
             else {
-               dword i;
+               unsigned int i;
                for (i = 0; i < cbMultiByte; i++) {
                   unsigned short ch = get_byte(lpMultiByteStr + i);
                   ch = mbwcdata[ch];
@@ -1423,11 +1423,11 @@ static const unsigned short *typeW = (const unsigned short *)
    "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x10\x02\x02\x03"
    "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03";
    
-void emu_GetStringTypeW(dword /*addr*/) {
-   dword dwInfoType = pop(SIZE_DWORD);
-   dword lpSrcStr = pop(SIZE_DWORD);
+void emu_GetStringTypeW(unsigned int /*addr*/) {
+   unsigned int dwInfoType = pop(SIZE_DWORD);
+   unsigned int lpSrcStr = pop(SIZE_DWORD);
    int cchSrc = (int)pop(SIZE_DWORD);
-   dword lpCharType = pop(SIZE_DWORD);
+   unsigned int lpCharType = pop(SIZE_DWORD);
 
    if (dwInfoType != 1) {
       //*** handle additional dwInfoType values
@@ -1493,12 +1493,12 @@ static const unsigned short *typeA = (const unsigned short *)
    "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x10\x02\x02\x03"
    "\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03\x02\x03";
    
-void emu_GetStringTypeA(dword /*addr*/) {
-   dword Locale = pop(SIZE_DWORD);
-   dword dwInfoType = pop(SIZE_DWORD);
-   dword lpSrcStr = pop(SIZE_DWORD);
+void emu_GetStringTypeA(unsigned int /*addr*/) {
+   unsigned int Locale = pop(SIZE_DWORD);
+   unsigned int dwInfoType = pop(SIZE_DWORD);
+   unsigned int lpSrcStr = pop(SIZE_DWORD);
    int cchSrc = (int)pop(SIZE_DWORD);
-   dword lpCharType = pop(SIZE_DWORD);
+   unsigned int lpCharType = pop(SIZE_DWORD);
 
    if (dwInfoType != 1) {
       //*** handle additional dwInfoType values
@@ -1538,13 +1538,13 @@ void emu_GetStringTypeA(dword /*addr*/) {
 }
 
 //*** need implementations for things other than lower and upper
-void emu_LCMapStringW(dword /*addr*/) {
-   dword Locale = pop(SIZE_DWORD);
-   dword dwMapFlags = pop(SIZE_DWORD);
-   dword lpSrcStr = pop(SIZE_DWORD);
-   dword cchSrc = pop(SIZE_DWORD);
-   dword lpDestStr = pop(SIZE_DWORD);
-   dword cchDest = pop(SIZE_DWORD);
+void emu_LCMapStringW(unsigned int /*addr*/) {
+   unsigned int Locale = pop(SIZE_DWORD);
+   unsigned int dwMapFlags = pop(SIZE_DWORD);
+   unsigned int lpSrcStr = pop(SIZE_DWORD);
+   unsigned int cchSrc = pop(SIZE_DWORD);
+   unsigned int lpDestStr = pop(SIZE_DWORD);
+   unsigned int cchDest = pop(SIZE_DWORD);
 
    eax = 1;
    
@@ -1572,7 +1572,7 @@ void emu_LCMapStringW(dword /*addr*/) {
                   eax = cchSrc;
                }
                else {
-                  for (dword i = 0; i < cchSrc; i++) {
+                  for (unsigned int i = 0; i < cchSrc; i++) {
                      patch_word(lpDestStr + i * 2, tolower(get_word(lpSrcStr + i * 2)));
                   }
                }
@@ -1582,7 +1582,7 @@ void emu_LCMapStringW(dword /*addr*/) {
                   eax = cchSrc;
                }
                else {
-                  for (dword i = 0; i < cchSrc; i++) {
+                  for (unsigned int i = 0; i < cchSrc; i++) {
                      patch_word(lpDestStr + i * 2, toupper(get_word(lpSrcStr + i * 2)));
                   }
                }
@@ -1634,13 +1634,13 @@ void emu_LCMapStringW(dword /*addr*/) {
 }
 
 //*** need implementations for things other than lower and upper
-void emu_LCMapStringA(dword /*addr*/) {
-   dword Locale = pop(SIZE_DWORD);
-   dword dwMapFlags = pop(SIZE_DWORD);
-   dword lpSrcStr = pop(SIZE_DWORD);
-   dword cchSrc = pop(SIZE_DWORD);
-   dword lpDestStr = pop(SIZE_DWORD);
-   dword cchDest = pop(SIZE_DWORD);
+void emu_LCMapStringA(unsigned int /*addr*/) {
+   unsigned int Locale = pop(SIZE_DWORD);
+   unsigned int dwMapFlags = pop(SIZE_DWORD);
+   unsigned int lpSrcStr = pop(SIZE_DWORD);
+   unsigned int cchSrc = pop(SIZE_DWORD);
+   unsigned int lpDestStr = pop(SIZE_DWORD);
+   unsigned int cchDest = pop(SIZE_DWORD);
 
    eax = 1;
    
@@ -1668,7 +1668,7 @@ void emu_LCMapStringA(dword /*addr*/) {
                   eax = cchSrc;
                }
                else {
-                  for (dword i = 0; i < cchSrc; i++) {
+                  for (unsigned int i = 0; i < cchSrc; i++) {
                      patch_byte(lpDestStr + i, tolower(get_byte(lpSrcStr + i)));
                   }
                }
@@ -1678,7 +1678,7 @@ void emu_LCMapStringA(dword /*addr*/) {
                   eax = cchSrc;
                }
                else {
-                  for (dword i = 0; i < cchSrc; i++) {
+                  for (unsigned int i = 0; i < cchSrc; i++) {
                      patch_byte(lpDestStr + i, toupper(get_byte(lpSrcStr + i)));
                   }
                }
@@ -1729,9 +1729,9 @@ void emu_LCMapStringA(dword /*addr*/) {
 }
 
 //*** need more code pages
-void emu_GetCPInfo(dword /*addr*/) {
-   dword CodePage = pop(SIZE_DWORD);
-   dword lpCPInfo = pop(SIZE_DWORD);
+void emu_GetCPInfo(unsigned int /*addr*/) {
+   unsigned int CodePage = pop(SIZE_DWORD);
+   unsigned int lpCPInfo = pop(SIZE_DWORD);
    
    eax = 1;
    switch (CodePage) {
@@ -1760,9 +1760,9 @@ void emu_GetCPInfo(dword /*addr*/) {
 static const char windowsDir[] = "C:\\Windows";
 
 //*** make the return value here configurable
-void emu_GetWindowsDirectoryA(dword /*addr*/) {
-   dword lpBuffer = pop(SIZE_DWORD);
-   dword uSize = pop(SIZE_DWORD);
+void emu_GetWindowsDirectoryA(unsigned int /*addr*/) {
+   unsigned int lpBuffer = pop(SIZE_DWORD);
+   unsigned int uSize = pop(SIZE_DWORD);
 
    if (uSize < sizeof(windowsDir)) {
       eax = sizeof(windowsDir);
@@ -1780,9 +1780,9 @@ void emu_GetWindowsDirectoryA(dword /*addr*/) {
 }
 
 //*** make the return value here configurable
-void emu_GetWindowsDirectoryW(dword /*addr*/) {
-   dword lpBuffer = pop(SIZE_DWORD);
-   dword uSize = pop(SIZE_DWORD);
+void emu_GetWindowsDirectoryW(unsigned int /*addr*/) {
+   unsigned int lpBuffer = pop(SIZE_DWORD);
+   unsigned int uSize = pop(SIZE_DWORD);
 
    if (uSize < sizeof(windowsDir)) {
       eax = sizeof(windowsDir);
@@ -1802,9 +1802,9 @@ void emu_GetWindowsDirectoryW(dword /*addr*/) {
 static const char systemDir[] = "C:\\Windows\\System32";
 
 //*** make the return value here configurable
-void emu_GetSystemDirectoryA(dword /*addr*/) {
-   dword lpBuffer = pop(SIZE_DWORD);
-   dword uSize = pop(SIZE_DWORD);
+void emu_GetSystemDirectoryA(unsigned int /*addr*/) {
+   unsigned int lpBuffer = pop(SIZE_DWORD);
+   unsigned int uSize = pop(SIZE_DWORD);
 
    if (uSize < sizeof(systemDir)) {
       eax = sizeof(systemDir);
@@ -1822,9 +1822,9 @@ void emu_GetSystemDirectoryA(dword /*addr*/) {
 }
 
 //*** make the return value here configurable
-void emu_GetSystemDirectoryW(dword /*addr*/) {
-   dword lpBuffer = pop(SIZE_DWORD);
-   dword uSize = pop(SIZE_DWORD);
+void emu_GetSystemDirectoryW(unsigned int /*addr*/) {
+   unsigned int lpBuffer = pop(SIZE_DWORD);
+   unsigned int uSize = pop(SIZE_DWORD);
 
    if (uSize < sizeof(systemDir)) {
       eax = sizeof(systemDir);
@@ -1841,10 +1841,10 @@ void emu_GetSystemDirectoryW(dword /*addr*/) {
    }
 }
 
-void emu_GetStdHandle(dword /*addr*/) {
-   dword handle = pop(SIZE_DWORD);
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+void emu_GetStdHandle(unsigned int /*addr*/) {
+   unsigned int handle = pop(SIZE_DWORD);
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pp = readDword(peb + PEB_PROCESS_PARMS);
    switch (handle) {
       case 0xfffffff6:   //STD_INPUT_HANDLE
          eax = get_long(pp + 0x18);
@@ -1865,35 +1865,35 @@ void emu_GetStdHandle(dword /*addr*/) {
    }
 }
 
-void emu_GetCommandLineW(dword /*addr*/) {
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+void emu_GetCommandLineW(unsigned int /*addr*/) {
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pp = readDword(peb + PEB_PROCESS_PARMS);
    eax = readDword(pp + PARMS_CMD_LINE + 4);
    if (doLogLib) {
       msg("call: GetCommandLineW() = 0x%x\n", eax);
    }
 }
 
-void emu_FreeEnvironmentStringsA(dword /*addr*/) {
-   dword env = pop(SIZE_DWORD);
+void emu_FreeEnvironmentStringsA(unsigned int /*addr*/) {
+   unsigned int env = pop(SIZE_DWORD);
    eax = HeapBase::getHeap()->free(env) ? 1 : 0;
    if (doLogLib) {
       msg("call: FreeEnvironmentStringsA(0x%x) = %d\n", env, eax);
    }
 }
 
-void emu_FreeEnvironmentStringsW(dword /*addr*/) {
-   dword env = pop(SIZE_DWORD);
+void emu_FreeEnvironmentStringsW(unsigned int /*addr*/) {
+   unsigned int env = pop(SIZE_DWORD);
    eax = 1;
    if (doLogLib) {
       msg("call: FreeEnvironmentStringsW(0x%x) = %d\n", env, eax);
    }
 }
 
-void emu_GetEnvironmentStringsA(dword /*addr*/) {
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pp = readDword(peb + PEB_PROCESS_PARMS);
-   dword wenv = readDword(pp + PARMS_ENV_PTR);
+void emu_GetEnvironmentStringsA(unsigned int /*addr*/) {
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pp = readDword(peb + PEB_PROCESS_PARMS);
+   unsigned int wenv = readDword(pp + PARMS_ENV_PTR);
    unsigned int len = 0;
    while (1) {
       while (get_word(wenv + len * 2)) {
@@ -1913,18 +1913,18 @@ void emu_GetEnvironmentStringsA(dword /*addr*/) {
    }
 }
 
-void emu_GetEnvironmentStringsW(dword /*addr*/) {
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pp = readDword(peb + PEB_PROCESS_PARMS);
+void emu_GetEnvironmentStringsW(unsigned int /*addr*/) {
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pp = readDword(peb + PEB_PROCESS_PARMS);
    eax = readDword(pp + PARMS_ENV_PTR);
    if (doLogLib) {
       msg("call: GetEnvironmentStringsW() = 0x%x\n", eax);
    }
 }
 
-void emu_FlsAlloc(dword addr) {
+void emu_FlsAlloc(unsigned int addr) {
    //for now this forwards to TlsAlloc
-   dword arg = pop(SIZE_DWORD);  //discard callback func argument
+   unsigned int arg = pop(SIZE_DWORD);  //discard callback func argument
    bool bak = doLogLib;
    doLogLib = false;
    emu_TlsAlloc(addr);
@@ -1934,14 +1934,14 @@ void emu_FlsAlloc(dword addr) {
    }
 }
 
-void emu_TlsAlloc(dword /*addr*/) {
-   //return is dword index of newly allocated value which is initialized to zero
+void emu_TlsAlloc(unsigned int /*addr*/) {
+   //return is unsigned int index of newly allocated value which is initialized to zero
    //fail value is TLS_OUT_OF_INDEXES
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword bitmapPtr = readDword(peb + PEB_TLS_BITMAP);
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int bitmapPtr = readDword(peb + PEB_TLS_BITMAP);
    for (int i = 0; i < 2; i++) {
-      dword bits = readDword(bitmapPtr);
-      dword bit = 1;
+      unsigned int bits = readDword(bitmapPtr);
+      unsigned int bit = 1;
       for (int j = 0; j < 32; j++) {
          if ((bits & bit) == 0) {
             bits |= bit;
@@ -1959,7 +1959,7 @@ void emu_TlsAlloc(dword /*addr*/) {
    }
    bitmapPtr = readDword(peb + PEB_TLS_EXP_BITMAP);
 
-   dword exp = readDword(fsBase + TEB_TLS_EXPANSION);
+   unsigned int exp = readDword(fsBase + TEB_TLS_EXPANSION);
    if (exp == 0) {
       exp = HeapBase::getHeap()->calloc(0x1000, 1);
       writeDword(fsBase + TEB_TLS_EXPANSION, exp);
@@ -1976,8 +1976,8 @@ void emu_TlsAlloc(dword /*addr*/) {
    }
 
    for (int i = 0; i < 32; i++) {
-      dword bits = readDword(bitmapPtr);
-      dword bit = 1;
+      unsigned int bits = readDword(bitmapPtr);
+      unsigned int bit = 1;
       for (int j = 0; j < 32; j++) {
          if ((bits & bit) == 0) {
             bits |= bit;
@@ -2002,16 +2002,16 @@ void emu_TlsAlloc(dword /*addr*/) {
    }
 }
 
-void emu_TlsFree(dword /*addr*/) {
+void emu_TlsFree(unsigned int /*addr*/) {
    //return is BOOL 0 - fail, 1 - success
-   dword dwTlsIndex = pop(SIZE_DWORD);
+   unsigned int dwTlsIndex = pop(SIZE_DWORD);
 
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword bword = dwTlsIndex >> 5;
-   dword bbit = 1 << (dwTlsIndex & 0x1F);
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int bword = dwTlsIndex >> 5;
+   unsigned int bbit = 1 << (dwTlsIndex & 0x1F);
    if (bword < 2) {
-      dword bitmapPtr = readDword(peb + PEB_TLS_BITMAP);
-      dword bits = readDword(bitmapPtr + bword * 4);
+      unsigned int bitmapPtr = readDword(peb + PEB_TLS_BITMAP);
+      unsigned int bits = readDword(bitmapPtr + bword * 4);
       if (bits & bbit) {
          bits &= ~bbit;
          writeDword(bitmapPtr + bword * 4, bits);
@@ -2024,8 +2024,8 @@ void emu_TlsFree(dword /*addr*/) {
    }
    else if (bword < 34) {
       bword -= 2;
-      dword bitmapPtr = readDword(peb + PEB_TLS_EXP_BITMAP);
-      dword bits = readDword(bitmapPtr + bword * 4);
+      unsigned int bitmapPtr = readDword(peb + PEB_TLS_EXP_BITMAP);
+      unsigned int bits = readDword(bitmapPtr + bword * 4);
       if (bits & bbit) {
          bits &= ~bbit;
          writeDword(bitmapPtr + bword * 4, bits);
@@ -2048,14 +2048,14 @@ void emu_TlsFree(dword /*addr*/) {
    }
 }
 
-void emu_TlsGetValue(dword /*addr*/) {
-   dword dwTlsIndex = pop(SIZE_DWORD);
+void emu_TlsGetValue(unsigned int /*addr*/) {
+   unsigned int dwTlsIndex = pop(SIZE_DWORD);
    if (dwTlsIndex < 64) {
       eax = readDword(fsBase + TEB_TLS_ARRAY + dwTlsIndex * 4);
       setThreadError(0);
    }
    else if (dwTlsIndex < (1024 + 64)) {
-      dword exp = readDword(fsBase + TEB_TLS_EXPANSION);
+      unsigned int exp = readDword(fsBase + TEB_TLS_EXPANSION);
       dwTlsIndex -= 64;
       if (exp == 0) {
          eax = 0;
@@ -2075,9 +2075,9 @@ void emu_TlsGetValue(dword /*addr*/) {
    }
 }
 
-void emu_TlsSetValue(dword /*addr*/) {
-   dword dwTlsIndex = pop(SIZE_DWORD);
-   dword lpTlsValue = pop(SIZE_DWORD);
+void emu_TlsSetValue(unsigned int /*addr*/) {
+   unsigned int dwTlsIndex = pop(SIZE_DWORD);
+   unsigned int lpTlsValue = pop(SIZE_DWORD);
    //returns BOOL 0 - fail, 1 - success
    //return is BOOL 0 - fail, 1 - success
    //kernel does no checking on whether index is actually allocated
@@ -2086,7 +2086,7 @@ void emu_TlsSetValue(dword /*addr*/) {
       eax = 1;
    }
    else if (dwTlsIndex < (1024 + 64)) {
-      dword exp = readDword(fsBase + TEB_TLS_EXPANSION);
+      unsigned int exp = readDword(fsBase + TEB_TLS_EXPANSION);
       dwTlsIndex -= 64;
       if (exp == 0) {
          exp = HeapBase::getHeap()->calloc(0x1000, 1);
@@ -2113,24 +2113,24 @@ void emu_TlsSetValue(dword /*addr*/) {
    }
 }
 
-void emu_GetLastError(dword /*addr*/) {
+void emu_GetLastError(unsigned int /*addr*/) {
    eax = readDword(fsBase + TEB_LAST_ERROR);
    if (doLogLib) {
       msg("call: GetLastError() = 0x%x\n", eax);
    }
 }
 
-void emu_SetLastError(dword /*addr*/) {
-   dword err = pop(SIZE_DWORD);
+void emu_SetLastError(unsigned int /*addr*/) {
+   unsigned int err = pop(SIZE_DWORD);
    setThreadError(err);
    if (doLogLib) {
       msg("call: SetLastError(0x%x)\n", err);
    }
 }
 
-void emu_AddVectoredExceptionHandler(dword /*addr*/) {
+void emu_AddVectoredExceptionHandler(unsigned int /*addr*/) {
    bool first = pop(SIZE_DWORD) != 0;
-   dword handler = pop(SIZE_DWORD);
+   unsigned int handler = pop(SIZE_DWORD);
    addVectoredExceptionHandler(first, handler);
    eax = handler;
    if (doLogLib) {
@@ -2138,15 +2138,15 @@ void emu_AddVectoredExceptionHandler(dword /*addr*/) {
    }
 }
 
-void emu_RemoveVectoredExceptionHandler(dword /*addr*/) {
-   dword handler = pop(SIZE_DWORD);
+void emu_RemoveVectoredExceptionHandler(unsigned int /*addr*/) {
+   unsigned int handler = pop(SIZE_DWORD);
    removeVectoredExceptionHandler(handler);
    if (doLogLib) {
       msg("call: RemoveVectoredExceptionHandler(0x%x)\n", handler);
    }
 }
 
-static void initCriticalSection(dword lpcs, dword spinCount) {
+static void initCriticalSection(unsigned int lpcs, unsigned int spinCount) {
    writeDword(lpcs, 0);   //DebugInfo
    writeDword(lpcs + 4, 0);   //LockCount
    writeDword(lpcs + 8, 0);   //RecursionCount
@@ -2155,8 +2155,8 @@ static void initCriticalSection(dword lpcs, dword spinCount) {
    writeDword(lpcs + 20, spinCount);   //SpinCount
 }
 
-void emu_InitializeCriticalSection(dword /*addr*/) {
-   dword lpCriticalSection = pop(SIZE_DWORD);
+void emu_InitializeCriticalSection(unsigned int /*addr*/) {
+   unsigned int lpCriticalSection = pop(SIZE_DWORD);
    initCriticalSection(lpCriticalSection, 0);
    //add lpCriticalSection to list of active critical sections
    if (doLogLib) {
@@ -2164,9 +2164,9 @@ void emu_InitializeCriticalSection(dword /*addr*/) {
    }
 }
 
-void emu_InitializeCriticalSectionAndSpinCount(dword /*addr*/) {
-   dword lpCriticalSection = pop(SIZE_DWORD);
-   dword spinCount = pop(SIZE_DWORD);
+void emu_InitializeCriticalSectionAndSpinCount(unsigned int /*addr*/) {
+   unsigned int lpCriticalSection = pop(SIZE_DWORD);
+   unsigned int spinCount = pop(SIZE_DWORD);
    initCriticalSection(lpCriticalSection, spinCount);
    //add lpCriticalSection to list of active critical sections
    
@@ -2178,12 +2178,12 @@ void emu_InitializeCriticalSectionAndSpinCount(dword /*addr*/) {
    }
 }
 
-bool tryEnterCriticalSection(dword /*addr*/) {
-   dword lpCriticalSection = pop(SIZE_DWORD);
+bool tryEnterCriticalSection(unsigned int /*addr*/) {
+   unsigned int lpCriticalSection = pop(SIZE_DWORD);
    //now verify that this is an active critical section
-   dword tid = readDword(lpCriticalSection + 12);
+   unsigned int tid = readDword(lpCriticalSection + 12);
    if (tid == 0 || tid == activeThread->handle) {
-      dword lockCount = readDword(lpCriticalSection + 4) + 1;
+      unsigned int lockCount = readDword(lpCriticalSection + 4) + 1;
       writeDword(lpCriticalSection + 4, lockCount);
       writeDword(lpCriticalSection + 12, activeThread->handle);
       return true;
@@ -2193,7 +2193,7 @@ bool tryEnterCriticalSection(dword /*addr*/) {
    }
 }
 
-void emu_EnterCriticalSection(dword addr) {
+void emu_EnterCriticalSection(unsigned int addr) {
    if (doLogLib) {
       msg("call: EnterCriticalSection(0x%x)\n", readDword(esp));
    }
@@ -2206,19 +2206,19 @@ void emu_EnterCriticalSection(dword addr) {
    }
 }
 
-void emu_TryEnterCriticalSection(dword addr) {
-   dword arg = readDword(esp);
+void emu_TryEnterCriticalSection(unsigned int addr) {
+   unsigned int arg = readDword(esp);
    eax = tryEnterCriticalSection(addr);
    if (doLogLib) {
       msg("call: TryEnterCriticalSection(0x%x) = %d\n", arg, eax);
    }
 }
 
-void emu_LeaveCriticalSection(dword /*addr*/) {
-   dword lpCriticalSection = pop(SIZE_DWORD); 
-   dword tid = readDword(lpCriticalSection + 12);
+void emu_LeaveCriticalSection(unsigned int /*addr*/) {
+   unsigned int lpCriticalSection = pop(SIZE_DWORD); 
+   unsigned int tid = readDword(lpCriticalSection + 12);
    if (tid == activeThread->handle) {
-      dword lockCount = readDword(lpCriticalSection + 4) - 1;
+      unsigned int lockCount = readDword(lpCriticalSection + 4) - 1;
       writeDword(lpCriticalSection + 4, lockCount);
       if (lockCount == 0) {
          writeDword(lpCriticalSection + 12, 0);
@@ -2230,23 +2230,23 @@ void emu_LeaveCriticalSection(dword /*addr*/) {
    }
 }
 
-void emu_DeleteCriticalSection(dword /*addr*/) {
-   dword lpCriticalSection = pop(SIZE_DWORD); 
+void emu_DeleteCriticalSection(unsigned int /*addr*/) {
+   unsigned int lpCriticalSection = pop(SIZE_DWORD); 
    //remove lpCriticalSection from list of active critical sections
    if (doLogLib) {
       msg("call: DeleteCriticalSection(0x%x)\n", lpCriticalSection);
    }
 }
 
-void emu_Sleep(dword /*addr*/) {
-   dword milliSec = pop(SIZE_DWORD);
+void emu_Sleep(unsigned int /*addr*/) {
+   unsigned int milliSec = pop(SIZE_DWORD);
    if (doLogLib) {
       msg("call: Sleep(0x%x)\n", milliSec);
    }
 }
 
-void emu_InterlockedIncrement(dword /*addr*/) {
-   dword addend = pop(SIZE_DWORD); 
+void emu_InterlockedIncrement(unsigned int /*addr*/) {
+   unsigned int addend = pop(SIZE_DWORD); 
    eax = readDword(addend) + 1;
    writeDword(addend, eax);
    if (doLogLib) {
@@ -2254,8 +2254,8 @@ void emu_InterlockedIncrement(dword /*addr*/) {
    }
 }
 
-void emu_InterlockedDecrement(dword /*addr*/) {
-   dword addend = pop(SIZE_DWORD); 
+void emu_InterlockedDecrement(unsigned int /*addr*/) {
+   unsigned int addend = pop(SIZE_DWORD); 
    eax = readDword(addend) - 1;
    writeDword(addend, eax);
    if (doLogLib) {
@@ -2263,16 +2263,16 @@ void emu_InterlockedDecrement(dword /*addr*/) {
    }
 }
 
-void emu_EncodePointer(dword /*addr*/) {
-   dword ptr = pop(SIZE_DWORD);
+void emu_EncodePointer(unsigned int /*addr*/) {
+   unsigned int ptr = pop(SIZE_DWORD);
    eax = ptr ^ randVal;
    if (doLogLib) {
       msg("call: EncodePointer(0x%x) = 0x%x\n", ptr, eax);
    }
 }
 
-void emu_DecodePointer(dword /*addr*/) {
-   dword ptr = pop(SIZE_DWORD);
+void emu_DecodePointer(unsigned int /*addr*/) {
+   unsigned int ptr = pop(SIZE_DWORD);
    eax = ptr ^ randVal;
    if (doLogLib) {
       msg("call: DecodePointer(0x%x) = 0x%x\n", ptr, eax);
@@ -2280,9 +2280,9 @@ void emu_DecodePointer(dword /*addr*/) {
 }
 
 void emu_lstrlen(unsigned int /*addr*/) {
-   dword str = pop(SIZE_DWORD);
-   dword arg = str;
-   dword len = 0;
+   unsigned int str = pop(SIZE_DWORD);
+   unsigned int arg = str;
+   unsigned int len = 0;
    while (isLoaded(str) && get_byte(str)) {
       len++;
       str++;
@@ -2293,8 +2293,8 @@ void emu_lstrlen(unsigned int /*addr*/) {
    }
 }
 
-void strcpy_common_wide(dword dest, dword src) {
-   dword val;
+void strcpy_common_wide(unsigned int dest, unsigned int src) {
+   unsigned int val;
    while (isLoaded(src)) {
       val = get_word(src);
       src += 2;
@@ -2306,15 +2306,15 @@ void strcpy_common_wide(dword dest, dword src) {
 
 void emu_lstrcpyW(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
-   dword src = pop(SIZE_DWORD);
+   unsigned int src = pop(SIZE_DWORD);
    strcpy_common_wide(eax, src);
    if (doLogLib) {
       msg("call: lstrcpyW(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
    }
 }
 
-void strcpy_common(dword dest, dword src) {
-   dword val;
+void strcpy_common(unsigned int dest, unsigned int src) {
+   unsigned int val;
    while (isLoaded(src)) {
       val = get_byte(src++);
       patch_byte(dest++, val);
@@ -2324,7 +2324,7 @@ void strcpy_common(dword dest, dword src) {
 
 void emu_lstrcpy(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
-   dword src = pop(SIZE_DWORD);
+   unsigned int src = pop(SIZE_DWORD);
    strcpy_common(eax, src);
    if (doLogLib) {
       msg("call: lstrcpy(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
@@ -2332,9 +2332,9 @@ void emu_lstrcpy(unsigned int /*addr*/) {
 }
 
 void emu_lstrcat(unsigned int /*addr*/) {
-   dword dest = pop(SIZE_DWORD);
+   unsigned int dest = pop(SIZE_DWORD);
    eax = dest;
-   dword src = pop(SIZE_DWORD);
+   unsigned int src = pop(SIZE_DWORD);
    //move to end of dest
    while (isLoaded(dest) && get_byte(dest)) dest++;
    strcpy_common(dest, src);
@@ -2344,9 +2344,9 @@ void emu_lstrcat(unsigned int /*addr*/) {
 }
 
 void emu_strcat(unsigned int /*addr*/) {
-   dword dest = readDword(esp);
+   unsigned int dest = readDword(esp);
    eax = dest;
-   dword src = readDword(esp + 4);
+   unsigned int src = readDword(esp + 4);
    //move to end of dest
    while (isLoaded(dest) && get_byte(dest)) dest++;
    strcpy_common(dest, src);
@@ -2357,16 +2357,16 @@ void emu_strcat(unsigned int /*addr*/) {
 
 void emu_strcpy(unsigned int /*addr*/) {
    eax = readDword(esp);
-   dword src = readDword(esp + 4);
+   unsigned int src = readDword(esp + 4);
    strcpy_common(eax, src);
    if (doLogLib) {
       msg("call: strcpy(0x%x, 0x%x) = 0x%x\n", eax, src, eax);
    }
 }
 
-void strncpy_common(dword dest, dword src, dword n) {
-   dword val;
-   dword i = 0;
+void strncpy_common(unsigned int dest, unsigned int src, unsigned int n) {
+   unsigned int val;
+   unsigned int i = 0;
    while (isLoaded(src) && i < n) {
       val = get_byte(src++);
       patch_byte(dest++, val);
@@ -2377,8 +2377,8 @@ void strncpy_common(dword dest, dword src, dword n) {
 
 void emu_strncpy(unsigned int /*addr*/) {
    eax = readDword(esp);
-   dword src = readDword(esp + 4);
-   dword n = readDword(esp + 8);
+   unsigned int src = readDword(esp + 4);
+   unsigned int n = readDword(esp + 8);
    strncpy_common(eax, src, n);
    if (doLogLib) {
       msg("call: strncpy(0x%x, 0x%x, %d)\n", eax, src, n);
@@ -2386,8 +2386,8 @@ void emu_strncpy(unsigned int /*addr*/) {
 }
 
 void emu_wcsset(unsigned int /*addr*/) {
-   dword dest = readDword(esp);
-   dword val = readDword(esp + 4);
+   unsigned int dest = readDword(esp);
+   unsigned int val = readDword(esp + 4);
    eax = dest;
    while (isLoaded(dest) && get_word(dest)) {
       patch_word(dest, val);
@@ -2399,10 +2399,10 @@ void emu_wcsset(unsigned int /*addr*/) {
 }
 
 void emu_strlwr(unsigned int /*addr*/) {
-   dword dest = readDword(esp);
+   unsigned int dest = readDword(esp);
    eax = dest;
    while (isLoaded(dest)) {
-      dword val = get_byte(dest);
+      unsigned int val = get_byte(dest);
       if (val == 0) break;
       patch_byte(dest++, tolower(val));
    }
@@ -2420,8 +2420,8 @@ void emu_RevertToSelf(unsigned int /*addr*/) {
 
 void emu_AreAnyAccessesGranted(unsigned int /*addr*/) {
    eax = 1;
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    if (doLogLib) {
       msg("call: AreAnyAccessesGranted(0x%x, 0x%x) = 1\n", arg1, arg2);
    }
@@ -2429,7 +2429,7 @@ void emu_AreAnyAccessesGranted(unsigned int /*addr*/) {
 
 void emu_GetBkMode(unsigned int /*addr*/) {
    eax = 0;
-   dword arg = pop(SIZE_DWORD);
+   unsigned int arg = pop(SIZE_DWORD);
    if (doLogLib) {
       msg("call: AreAnyAccessesGranted(0x%x) = 0\n", arg);
    }
@@ -2444,7 +2444,7 @@ void emu_GdiFlush(unsigned int /*addr*/) {
 
 void emu_GetROP2(unsigned int /*addr*/) {
    eax = 0;
-   dword arg = pop(SIZE_DWORD);
+   unsigned int arg = pop(SIZE_DWORD);
    if (doLogLib) {
       msg("call: GetROP2(0x%x) = 0\n", arg);
    }
@@ -2452,7 +2452,7 @@ void emu_GetROP2(unsigned int /*addr*/) {
 
 void emu_GetBkColor(unsigned int /*addr*/) {
    eax = 0;
-   dword arg = pop(SIZE_DWORD);
+   unsigned int arg = pop(SIZE_DWORD);
    if (doLogLib) {
       msg("call: GetBkColor(0x%x) = 0\n", arg);
    }
@@ -2466,14 +2466,14 @@ void emu_GdiGetBatchLimit(unsigned int /*addr*/) {
 }
 
 void emu_StrCmpW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword arg1 = str1;
-   dword str2 = pop(SIZE_DWORD);
-   dword arg2 = str2;
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int arg1 = str1;
+   unsigned int str2 = pop(SIZE_DWORD);
+   unsigned int arg2 = str2;
    eax = 1;
    while (isLoaded(str1) && isLoaded(str2)) {
-      dword val1 = get_word(str1);
-      dword val2 = get_word(str2);
+      unsigned int val1 = get_word(str1);
+      unsigned int val2 = get_word(str2);
       int res = val1 - val2;
       if (res) {
          if (res < 0) eax = 0xFFFFFFFF;
@@ -2492,8 +2492,8 @@ void emu_StrCmpW(unsigned int /*addr*/) {
 }
 
 void emu_StrSpnA(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword str2 = pop(SIZE_DWORD);
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int str2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: StrSpnA(0x%x, 0x%x) = %d\n", str1, str2, eax);
@@ -2501,14 +2501,14 @@ void emu_StrSpnA(unsigned int /*addr*/) {
 }
 
 void emu_StrCmpIW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword arg1 = str1;
-   dword str2 = pop(SIZE_DWORD);
-   dword arg2 = str2;
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int arg1 = str1;
+   unsigned int str2 = pop(SIZE_DWORD);
+   unsigned int arg2 = str2;
    eax = 1;
    while (isLoaded(str1) && isLoaded(str2)) {
-      dword val1 = towlower(get_word(str1));
-      dword val2 = towlower(get_word(str2));
+      unsigned int val1 = towlower(get_word(str1));
+      unsigned int val2 = towlower(get_word(str2));
       int res = val1 - val2;
       if (res) {
          if (res < 0) eax = 0xFFFFFFFF;
@@ -2527,13 +2527,13 @@ void emu_StrCmpIW(unsigned int /*addr*/) {
 }
 
 void emu_StrCpyW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword arg1 = str1;
-   dword str2 = pop(SIZE_DWORD);
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int arg1 = str1;
+   unsigned int str2 = pop(SIZE_DWORD);
    eax = str1;
-   dword arg2 = str2;
+   unsigned int arg2 = str2;
    while (isLoaded(str2)) {
-      dword val1 = get_word(str2);
+      unsigned int val1 = get_word(str2);
       patch_word(str1, val1);
       if (val1 == 0) { //end of string
          break;
@@ -2547,9 +2547,9 @@ void emu_StrCpyW(unsigned int /*addr*/) {
 }
 
 void emu_StrChrIA(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
+   unsigned int str1 = pop(SIZE_DWORD);
    int match = tolower(pop(SIZE_DWORD));
-   dword val = get_byte(str1);
+   unsigned int val = get_byte(str1);
    eax = 0;
    while (isLoaded(str1) && val) {
       if (tolower(val) == match) {
@@ -2564,8 +2564,8 @@ void emu_StrChrIA(unsigned int /*addr*/) {
 }
 
 void emu_StrCSpnIA(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword str2 = pop(SIZE_DWORD);
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int str2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: emu_StrCSpnIA(0x%x, 0x%x)\n", str1, str2);
@@ -2573,10 +2573,10 @@ void emu_StrCSpnIA(unsigned int /*addr*/) {
 }
 
 void emu_StrChrIW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword arg1 = str1;
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int arg1 = str1;
    int match = towlower(pop(SIZE_DWORD));
-   dword val = get_word(str1);
+   unsigned int val = get_word(str1);
    eax = 0;
    while (isLoaded(str1) && val != 0) {
       if (towlower(val) == match) {
@@ -2592,15 +2592,15 @@ void emu_StrChrIW(unsigned int /*addr*/) {
 }
 
 void emu_StrCmpNW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword arg1 = str1;
-   dword str2 = pop(SIZE_DWORD);
-   dword arg2 = str2;
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int arg1 = str1;
+   unsigned int str2 = pop(SIZE_DWORD);
+   unsigned int arg2 = str2;
    int n = pop(SIZE_DWORD);
    eax = 0;
    for (int i = 0; i < n && isLoaded(str1) && isLoaded(str2); i++) {
-      dword val1 = get_word(str1);
-      dword val2 = get_word(str2);
+      unsigned int val1 = get_word(str1);
+      unsigned int val2 = get_word(str2);
       int res = val1 - val2;
       if (res) {
          eax = res < 0 ? 0xFFFFFFFF : 1;
@@ -2618,15 +2618,15 @@ void emu_StrCmpNW(unsigned int /*addr*/) {
 }
 
 void emu_StrCmpNIW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword arg1 = str1;
-   dword str2 = pop(SIZE_DWORD);
-   dword arg2 = str2;
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int arg1 = str1;
+   unsigned int str2 = pop(SIZE_DWORD);
+   unsigned int arg2 = str2;
    int n = pop(SIZE_DWORD);
    eax = 0;
    for (int i = 0; i < n && isLoaded(str1) && isLoaded(str2); i++) {
-      dword val1 = towlower(get_word(str1));
-      dword val2 = towlower(get_word(str2));
+      unsigned int val1 = towlower(get_word(str1));
+      unsigned int val2 = towlower(get_word(str2));
       int res = val1 - val2;
       if (res) {
          eax = (res < 0) ? 0xFFFFFFFF : 1;
@@ -2644,8 +2644,8 @@ void emu_StrCmpNIW(unsigned int /*addr*/) {
 }
 
 void emu_StrCSpnIW(unsigned int /*addr*/) {
-   dword str1 = pop(SIZE_DWORD);
-   dword str2 = pop(SIZE_DWORD);
+   unsigned int str1 = pop(SIZE_DWORD);
+   unsigned int str2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: StrCmpNIW(0x%x, 0x%x) = %d\n", str1, str2, eax);
@@ -2653,8 +2653,8 @@ void emu_StrCSpnIW(unsigned int /*addr*/) {
 }
 
 void emu_GetClientRect(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetClientRect(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2669,7 +2669,7 @@ void emu_GetACP(unsigned int /*addr*/) {
 }
 
 void emu_IsCharUpperA(unsigned int /*addr*/) {
-   dword ch = pop(SIZE_DWORD);
+   unsigned int ch = pop(SIZE_DWORD);
    eax = isupper(ch);
    if (doLogLib) {
       msg("call: IsCharUpperA(0x%x) = %d\n", ch, eax);
@@ -2677,7 +2677,7 @@ void emu_IsCharUpperA(unsigned int /*addr*/) {
 }
 
 void emu_IsCharAlphaA(unsigned int /*addr*/) {
-   dword ch = pop(SIZE_DWORD);
+   unsigned int ch = pop(SIZE_DWORD);
    eax = isalpha(ch);
    if (doLogLib) {
       msg("call: IsCharAlphaA(0x%x) = %d\n", ch, eax);
@@ -2685,8 +2685,8 @@ void emu_IsCharAlphaA(unsigned int /*addr*/) {
 }
 
 void emu_GetIconInfo(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetIconInfo(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2694,8 +2694,8 @@ void emu_GetIconInfo(unsigned int /*addr*/) {
 }
 
 void emu_GetWindow(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetWindow(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2703,8 +2703,8 @@ void emu_GetWindow(unsigned int /*addr*/) {
 }
 
 void emu_IsChild(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: IsChild(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2712,7 +2712,7 @@ void emu_IsChild(unsigned int /*addr*/) {
 }
 
 void emu_GetTopWindow(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetTopWindow(0x%x) = %d\n", arg1, eax);
@@ -2720,7 +2720,7 @@ void emu_GetTopWindow(unsigned int /*addr*/) {
 }
 
 void emu_GetWindowContextHelpId(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetWindowContextHelpId(0x%x) = %d\n", arg1, eax);
@@ -2728,7 +2728,7 @@ void emu_GetWindowContextHelpId(unsigned int /*addr*/) {
 }
 
 void emu_WindowFromDC(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: WindowFromDC(0x%x) = %d\n", arg1, eax);
@@ -2736,8 +2736,8 @@ void emu_WindowFromDC(unsigned int /*addr*/) {
 }
 
 void emu_GetWindowPlacement(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetWindowPlacement(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2745,7 +2745,7 @@ void emu_GetWindowPlacement(unsigned int /*addr*/) {
 }
 
 void emu_CopyIcon(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: CopyIcon(0x%x) = %d\n", arg1, eax);
@@ -2753,7 +2753,7 @@ void emu_CopyIcon(unsigned int /*addr*/) {
 }
 
 void emu_IsIconic(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: IsIconic(0x%x) = %d\n", arg1, eax);
@@ -2761,8 +2761,8 @@ void emu_IsIconic(unsigned int /*addr*/) {
 }
 
 void emu_GetGUIThreadInfo(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetGUIThreadInfo(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2770,7 +2770,7 @@ void emu_GetGUIThreadInfo(unsigned int /*addr*/) {
 }
 
 void emu_GetDC(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetDC(0x%x) = %d\n", arg1, eax);
@@ -2778,8 +2778,8 @@ void emu_GetDC(unsigned int /*addr*/) {
 }
 
 void emu_GetTitleBarInfo(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetTitleBarInfo(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2787,7 +2787,7 @@ void emu_GetTitleBarInfo(unsigned int /*addr*/) {
 }
 
 void emu_IsWindowUnicode(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: IsWindowUnicode(0x%x) = %d\n", arg1, eax);
@@ -2795,7 +2795,7 @@ void emu_IsWindowUnicode(unsigned int /*addr*/) {
 }
 
 void emu_IsMenu(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: IsMenu(0x%x) = %d\n", arg1, eax);
@@ -2803,8 +2803,8 @@ void emu_IsMenu(unsigned int /*addr*/) {
 }
 
 void emu_GetWindowRect(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetWindowRect(0x%x, 0x%x) = %d\n", arg1, arg2, eax);
@@ -2812,7 +2812,7 @@ void emu_GetWindowRect(unsigned int /*addr*/) {
 }
 
 void emu_IsWindowVisible(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: IsWindowVisible(0x%x) = %d\n", arg1, eax);
@@ -2834,9 +2834,9 @@ void emu_InSendMessage(unsigned int /*addr*/) {
 }
 
 void emu_GetWindowTextA(unsigned int /*addr*/) {
-   dword arg1 = pop(SIZE_DWORD);
-   dword arg2 = pop(SIZE_DWORD);
-   dword arg3 = pop(SIZE_DWORD);
+   unsigned int arg1 = pop(SIZE_DWORD);
+   unsigned int arg2 = pop(SIZE_DWORD);
+   unsigned int arg3 = pop(SIZE_DWORD);
    eax = 0;
    if (doLogLib) {
       msg("call: GetWindowTextA(0x%x, 0x%x, 0x%x) = %d\n", arg1, arg2, arg3, eax);
@@ -2857,8 +2857,8 @@ void emu_IsUserAnAdmin(unsigned int /*addr*/) {
 #endif
 
 void emu_GetVersionExA(unsigned int /*addr*/) {
-   dword ptr = pop(SIZE_DWORD);
-   dword sz = get_long(ptr);
+   unsigned int ptr = pop(SIZE_DWORD);
+   unsigned int sz = get_long(ptr);
    eax = 1;
    if (sz != 0x94 && sz != 0x9C) {
       eax = 0;
@@ -2885,17 +2885,17 @@ void emu_GetVersion(unsigned int /*addr*/) {
 }
 
 void emu_GetTickCount(unsigned int /*addr*/) {
-   eax = (dword)(tsc.ll / 1000000);
+   eax = (unsigned int)(tsc.ll / 1000000);
    if (doLogLib) {
       msg("call: GetTickCount() = 0x%x\n", eax);
    }
 }
 
-void emu_GetSystemTimeAsFileTime(dword /*addr*/) {
-   dword lpSystemTimeAsFileTime = pop(SIZE_DWORD);
-   quad time = tsc.ll / 100;  //tsc is roughly nanosec counter
-   dword tbuf[2];
-   quad *t = (quad*)tbuf;
+void emu_GetSystemTimeAsFileTime(unsigned int /*addr*/) {
+   unsigned int lpSystemTimeAsFileTime = pop(SIZE_DWORD);
+   unsigned long long time = tsc.ll / 100;  //tsc is roughly nanosec counter
+   unsigned int tbuf[2];
+   unsigned long long *t = (unsigned long long*)tbuf;
    getSystemBaseTime(tbuf, tbuf + 1);
    t += time;
    writeDword(lpSystemTimeAsFileTime, tbuf[0]);
@@ -2905,8 +2905,8 @@ void emu_GetSystemTimeAsFileTime(dword /*addr*/) {
    }
 }
 
-void emu_QueryPerformanceCounter(dword /*addr*/) {
-   dword lpPerformanceCount = pop(SIZE_DWORD);
+void emu_QueryPerformanceCounter(unsigned int /*addr*/) {
+   unsigned int lpPerformanceCount = pop(SIZE_DWORD);
    writeDword(lpPerformanceCount, tsc.low);
    writeDword(lpPerformanceCount + 4, tsc.high);
    if (doLogLib) {
@@ -2914,8 +2914,8 @@ void emu_QueryPerformanceCounter(dword /*addr*/) {
    }
 }
 
-void emu_IsDebuggerPresent(dword /*addr*/) {
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
+void emu_IsDebuggerPresent(unsigned int /*addr*/) {
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
    eax = get_byte(peb + 2);
    msg("x86emu: IsDebuggerPresent called\n");
    if (doLogLib) {
@@ -2923,10 +2923,10 @@ void emu_IsDebuggerPresent(dword /*addr*/) {
    }
 }
 
-void emu_CheckRemoteDebuggerPresent(dword /*addr*/) {
+void emu_CheckRemoteDebuggerPresent(unsigned int /*addr*/) {
    eax = 1;
-   dword hProcess = pop(SIZE_DWORD);
-   dword pbDebuggerPresent = pop(SIZE_DWORD);
+   unsigned int hProcess = pop(SIZE_DWORD);
+   unsigned int pbDebuggerPresent = pop(SIZE_DWORD);
    writeMem(pbDebuggerPresent, 0, SIZE_DWORD);
    msg("x86emu: CheckRemoteDebuggerPresent called\n");
    if (doLogLib) {
@@ -2934,8 +2934,8 @@ void emu_CheckRemoteDebuggerPresent(dword /*addr*/) {
    }
 }
 
-void emu_CloseHandle(dword /*addr*/) {
-   dword hObject = pop(SIZE_DWORD);
+void emu_CloseHandle(unsigned int /*addr*/) {
+   unsigned int hObject = pop(SIZE_DWORD);
    msg("x86emu: CloseHandle(0x%x) called\n", hObject);
 /*
    if (isValidHandle(hObject)) {
@@ -2989,12 +2989,12 @@ typedef struct _SYSTEM_MODULE_INFORMATION {
    SYSTEM_MODULE Modules[1];
 } SYSTEM_MODULE_INFORMATION, *PSYSTEM_MODULE_INFORMATION;
 
-void emu_NtQuerySystemInformation(dword /*addr*/) {
+void emu_NtQuerySystemInformation(unsigned int /*addr*/) {
    eax = 0; //success
-   dword SystemInformationClass = pop(SIZE_DWORD);
-   dword pSystemInformation = pop(SIZE_DWORD);
-   dword SystemInformationLength = pop(SIZE_DWORD);
-   dword pReturnLength = pop(SIZE_DWORD);
+   unsigned int SystemInformationClass = pop(SIZE_DWORD);
+   unsigned int pSystemInformation = pop(SIZE_DWORD);
+   unsigned int SystemInformationLength = pop(SIZE_DWORD);
+   unsigned int pReturnLength = pop(SIZE_DWORD);
    msg("x86emu: NtQuerySystemInformation(%d, 0x%x, %d, 0x%x) called\n", 
        SystemInformationClass, pSystemInformation, SystemInformationLength, pReturnLength);
 
@@ -3023,11 +3023,11 @@ void emu_NtQuerySystemInformation(dword /*addr*/) {
          break;
       case SystemModuleInformation: {
          HandleNode *hl;
-         dword count = 0;
+         unsigned int count = 0;
          for (hl = moduleHead; hl; hl = hl->next) {
             count++;
          }
-         dword size = count * sizeof(SYSTEM_MODULE) + 4;
+         unsigned int size = count * sizeof(SYSTEM_MODULE) + 4;
          if (SystemInformationLength < size) {
             eax = 0xC0000004;
          }
@@ -3086,12 +3086,12 @@ typedef enum _THREADINFOCLASS {
    ThreadHideFromDebugger
 } THREADINFOCLASS, *PTHREADINFOCLASS;
 
-void emu_NtSetInformationThread(dword /*addr*/) {
+void emu_NtSetInformationThread(unsigned int /*addr*/) {
    eax = 0; //success
-   dword ThreadHandle = pop(SIZE_DWORD);
-   dword ThreadInformationClass = pop(SIZE_DWORD);
-   dword pThreadInformation = pop(SIZE_DWORD);
-   dword ThreadInformationLength = pop(SIZE_DWORD);
+   unsigned int ThreadHandle = pop(SIZE_DWORD);
+   unsigned int ThreadInformationClass = pop(SIZE_DWORD);
+   unsigned int pThreadInformation = pop(SIZE_DWORD);
+   unsigned int ThreadInformationLength = pop(SIZE_DWORD);
    msg("x86emu: NtSetInformationThread(0x%08x, %d, 0x%x, %d) called\n", 
        ThreadHandle, ThreadInformationClass, pThreadInformation, ThreadInformationLength);
 
@@ -3114,13 +3114,13 @@ typedef enum _PROCESSINFOCLASS {
 
 //#define STATUS_INFO_LENGTH_MISMATCH 0xC0000004
 
-void emu_NtQueryInformationProcess(dword /*addr*/) {
+void emu_NtQueryInformationProcess(unsigned int /*addr*/) {
    eax = 0; //success
-   dword ProcessHandle = pop(SIZE_DWORD);
-   dword ProcessInformationClass = pop(SIZE_DWORD);
-   dword pProcessInformation = pop(SIZE_DWORD);
-   dword ProcessInformationLength = pop(SIZE_DWORD);
-   dword pReturnLength = pop(SIZE_DWORD);
+   unsigned int ProcessHandle = pop(SIZE_DWORD);
+   unsigned int ProcessInformationClass = pop(SIZE_DWORD);
+   unsigned int pProcessInformation = pop(SIZE_DWORD);
+   unsigned int ProcessInformationLength = pop(SIZE_DWORD);
+   unsigned int pReturnLength = pop(SIZE_DWORD);
 
    msg("x86emu: NtQueryInformationProcess(0x%x, %d, 0x%x, %d, 0x%x) called\n", 
        ProcessHandle, ProcessInformationClass, pProcessInformation, 
@@ -3166,30 +3166,30 @@ void emu_NtQueryInformationProcess(dword /*addr*/) {
    }
 }
 
-void emu_GetCurrentProcess(dword /*addr*/) {
+void emu_GetCurrentProcess(unsigned int /*addr*/) {
    eax = 0xffffffff;
    if (doLogLib) {
       msg("call: GetCurrentProcess() = 0x%x\n", eax);
    }
 }
 
-void emu_GetCurrentProcessId(dword /*addr*/) {
+void emu_GetCurrentProcessId(unsigned int /*addr*/) {
    eax = get_long(fsBase + TEB_PROCESS_ID);
    if (doLogLib) {
       msg("call: GetCurrentProcessId() = 0x%x\n", eax);
    }
 }
 
-void emu_GetCurrentThreadId(dword /*addr*/) {
+void emu_GetCurrentThreadId(unsigned int /*addr*/) {
    eax = get_long(fsBase + TEB_THREAD_ID);
    if (doLogLib) {
       msg("call: GetCurrentThreadId() = 0x%x\n", eax);
    }
 }
 
-void emu_GetThreadContext(dword /*addr*/) {
-   dword hThread = pop(SIZE_DWORD);
-   dword lpContext = pop(SIZE_DWORD);
+void emu_GetThreadContext(unsigned int /*addr*/) {
+   unsigned int hThread = pop(SIZE_DWORD);
+   unsigned int lpContext = pop(SIZE_DWORD);
    WIN_CONTEXT ctx;
    initContext(&ctx);
    ThreadNode *tn = findThread(hThread);
@@ -3208,23 +3208,23 @@ void emu_GetThreadContext(dword /*addr*/) {
 }
 
 //need to allocate new TEB here and link to PEB
-void emu_CreateThread(dword /*addr*/) {
-   dword lpThreadAttributes = pop(SIZE_DWORD);
-   dword dwStackSize = pop(SIZE_DWORD);
-   dword lpStartAddress = pop(SIZE_DWORD);
-   dword lpParameter = pop(SIZE_DWORD);
-   dword dwCreationFlags = pop(SIZE_DWORD);
-   dword lpThreadId = pop(SIZE_DWORD);
+void emu_CreateThread(unsigned int /*addr*/) {
+   unsigned int lpThreadAttributes = pop(SIZE_DWORD);
+   unsigned int dwStackSize = pop(SIZE_DWORD);
+   unsigned int lpStartAddress = pop(SIZE_DWORD);
+   unsigned int lpParameter = pop(SIZE_DWORD);
+   unsigned int dwCreationFlags = pop(SIZE_DWORD);
+   unsigned int lpThreadId = pop(SIZE_DWORD);
    
    ThreadNode *tn = emu_create_thread(lpStartAddress, lpParameter);
    
-   dword newTeb = tn->regs.segBase[FS];
+   unsigned int newTeb = tn->regs.segBase[FS];
    //read some fields from current thread
-   dword peb = readDword(fsBase + TEB_PEB_PTR);
-   dword pid = readDword(fsBase + TEB_PROCESS_ID);
-   dword lastChance = readDword(fsBase + 0xf84);
+   unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+   unsigned int pid = readDword(fsBase + TEB_PROCESS_ID);
+   unsigned int lastChance = readDword(fsBase + 0xf84);
    
-   dword top = tn->regs.general[ESP] + 32;
+   unsigned int top = tn->regs.general[ESP] + 32;
 
    patch_long(newTeb + TEB_PROCESS_ID, pid);
    patch_long(newTeb + TEB_THREAD_ID, tn->id);
@@ -3253,13 +3253,13 @@ void emu_CreateThread(dword /*addr*/) {
 
 //this is a heap allocation routine that also updates a 
 //windows PEB
-dword addHeapCommon(unsigned int maxSize, unsigned int base) {
+unsigned int addHeapCommon(unsigned int maxSize, unsigned int base) {
    if (fsBase) {
-      dword peb = readDword(fsBase + TEB_PEB_PTR);
-      dword num_heaps = readDword(peb + PEB_NUM_HEAPS);
-      dword max_heaps = readDword(peb + PEB_MAX_HEAPS);
+      unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
+      unsigned int num_heaps = readDword(peb + PEB_NUM_HEAPS);
+      unsigned int max_heaps = readDword(peb + PEB_MAX_HEAPS);
       if (num_heaps < max_heaps) {
-         dword res = HeapBase::addHeap(maxSize, base);
+         unsigned int res = HeapBase::addHeap(maxSize, base);
          writeDword(peb + PEB_NUM_HEAPS, num_heaps + 1);
          writeDword(peb + SIZEOF_PEB + 4 * num_heaps, res);
          return res;
@@ -3272,12 +3272,12 @@ dword addHeapCommon(unsigned int maxSize, unsigned int base) {
    return HeapBase::addHeap(maxSize, base);
 }
 
-void emu_HeapCreate(dword /*addr*/) {
+void emu_HeapCreate(unsigned int /*addr*/) {
    //need to test PEB_NUM_HEAPS against PEB_MAX_HEAPS ??
    
-   dword flOptions = pop(SIZE_DWORD); 
-   dword dwInitialSize = pop(SIZE_DWORD);
-   dword dwMaximumSize = pop(SIZE_DWORD);
+   unsigned int flOptions = pop(SIZE_DWORD); 
+   unsigned int dwInitialSize = pop(SIZE_DWORD);
+   unsigned int dwMaximumSize = pop(SIZE_DWORD);
    //we are not going to try to do growable heaps here
    if (dwMaximumSize == 0) dwMaximumSize = 0x01000000;
    eax = HeapBase::getHeap()->addHeap(dwMaximumSize);
@@ -3288,25 +3288,25 @@ void emu_HeapCreate(dword /*addr*/) {
    }
 }
 
-void emu_HeapDestroy(dword /*addr*/) {
-   dword hHeap = pop(SIZE_DWORD); 
+void emu_HeapDestroy(unsigned int /*addr*/) {
+   unsigned int hHeap = pop(SIZE_DWORD); 
    eax = HeapBase::getHeap()->destroyHeap(hHeap);
    if (doLogLib) {
       msg("call: HeapDestroy(0x%x) = 0x%x\n", hHeap, eax); 
    }
 }
 
-void emu_GetProcessHeap(dword /*addr*/) {
+void emu_GetProcessHeap(unsigned int /*addr*/) {
    eax = HeapBase::getHeap()->getPrimaryHeap();
    if (doLogLib) {
       msg("call: GetProcessHeap() = 0x%x\n", eax); 
    }
 }
 
-void emu_HeapAlloc(dword /*addr*/) {
-   dword hHeap = pop(SIZE_DWORD); 
-   dword dwFlags = pop(SIZE_DWORD);
-   dword dwBytes = pop(SIZE_DWORD);
+void emu_HeapAlloc(unsigned int /*addr*/) {
+   unsigned int hHeap = pop(SIZE_DWORD); 
+   unsigned int dwFlags = pop(SIZE_DWORD);
+   unsigned int dwBytes = pop(SIZE_DWORD);
    EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    //are HeapAlloc  blocks zero'ed?
    eax = h ? h->calloc(dwBytes, 1) : 0;
@@ -3315,10 +3315,10 @@ void emu_HeapAlloc(dword /*addr*/) {
    }
 }
 
-void emu_HeapFree(dword /*addr*/) {
-   dword hHeap = pop(SIZE_DWORD); 
-   dword dwFlags = pop(SIZE_DWORD);
-   dword lpMem = pop(SIZE_DWORD);
+void emu_HeapFree(unsigned int /*addr*/) {
+   unsigned int hHeap = pop(SIZE_DWORD); 
+   unsigned int dwFlags = pop(SIZE_DWORD);
+   unsigned int lpMem = pop(SIZE_DWORD);
    EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    eax = h ? h->free(lpMem) : 0;
    if (doLogLib) {
@@ -3326,10 +3326,10 @@ void emu_HeapFree(dword /*addr*/) {
    }
 }
 
-void emu_HeapSize(dword /*addr*/) {
-   dword hHeap = pop(SIZE_DWORD); 
-   dword dwFlags = pop(SIZE_DWORD);
-   dword lpMem = pop(SIZE_DWORD);
+void emu_HeapSize(unsigned int /*addr*/) {
+   unsigned int hHeap = pop(SIZE_DWORD); 
+   unsigned int dwFlags = pop(SIZE_DWORD);
+   unsigned int lpMem = pop(SIZE_DWORD);
 
    EmuHeap *h = (EmuHeap*)HeapBase::getHeap()->findHeap(hHeap);
    eax = h ? h->sizeOf(lpMem) : 0xffffffff;
@@ -3340,9 +3340,9 @@ void emu_HeapSize(dword /*addr*/) {
 
 }
 
-void emu_GlobalAlloc(dword /*addr*/) {
-   dword uFlags = pop(SIZE_DWORD); 
-   dword dwSize = pop(SIZE_DWORD);
+void emu_GlobalAlloc(unsigned int /*addr*/) {
+   unsigned int uFlags = pop(SIZE_DWORD); 
+   unsigned int dwSize = pop(SIZE_DWORD);
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->calloc(dwSize, 1);
    if (doLogLib) {
@@ -3350,40 +3350,40 @@ void emu_GlobalAlloc(dword /*addr*/) {
    }
 }
 
-void emu_GlobalFree(dword /*addr*/) {
+void emu_GlobalFree(unsigned int /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   dword ptr = pop(SIZE_DWORD);
+   unsigned int ptr = pop(SIZE_DWORD);
    eax = p->free(ptr);
    if (doLogLib) {
       msg("call: GlobalFree(0x%x) = 0x%x\n", ptr, eax); 
    }
 }
 
-void emu_GlobalLock(dword /*addr*/) {
+void emu_GlobalLock(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD);
    if (doLogLib) {
       msg("call: GlobalLock(0x%x) = 0x%x\n", eax, eax); 
    }
 }
 
-void emu_NtAllocateVirtualMemory(dword /*addr*/) {
-   dword procHandle = pop(SIZE_DWORD); 
-   dword pBaseAddress = pop(SIZE_DWORD); 
-   dword zeroBits = pop(SIZE_DWORD); 
-   dword pRegionSize = pop(SIZE_DWORD);
-   dword flAllocationType = pop(SIZE_DWORD);
-   dword flProtect = pop(SIZE_DWORD);
-   dword rbase = get_long(pBaseAddress);
-   dword dwSize = get_long(pRegionSize);
-   dword base = rbase & 0xFFFFF000;
+void emu_NtAllocateVirtualMemory(unsigned int /*addr*/) {
+   unsigned int procHandle = pop(SIZE_DWORD); 
+   unsigned int pBaseAddress = pop(SIZE_DWORD); 
+   unsigned int zeroBits = pop(SIZE_DWORD); 
+   unsigned int pRegionSize = pop(SIZE_DWORD);
+   unsigned int flAllocationType = pop(SIZE_DWORD);
+   unsigned int flProtect = pop(SIZE_DWORD);
+   unsigned int rbase = get_long(pBaseAddress);
+   unsigned int dwSize = get_long(pRegionSize);
+   unsigned int base = rbase & 0xFFFFF000;
    if (rbase) {
-      dword end = (rbase + dwSize + 0xFFF) & 0xFFFFF000;
+      unsigned int end = (rbase + dwSize + 0xFFF) & 0xFFFFF000;
       dwSize = end - rbase;
    }
    else {
       dwSize = (dwSize + 0xFFF) & 0xFFFFF000;
    }
-   dword maddr = MemMgr::mmap(base, dwSize, 0, 0);
+   unsigned int maddr = MemMgr::mmap(base, dwSize, 0, 0);
    patch_long(pRegionSize, dwSize);
    patch_long(pBaseAddress, maddr);
    eax = 0;   //NTSTATUS
@@ -3394,14 +3394,14 @@ void emu_NtAllocateVirtualMemory(dword /*addr*/) {
    }
 }
 
-void emu_VirtualAlloc(dword /*addr*/) {
-   dword lpAddress = pop(SIZE_DWORD); 
-   dword dwSize = pop(SIZE_DWORD);
-   dword flAllocationType = pop(SIZE_DWORD);
-   dword flProtect = pop(SIZE_DWORD);
-   dword base = lpAddress & 0xFFFFF000;
+void emu_VirtualAlloc(unsigned int /*addr*/) {
+   unsigned int lpAddress = pop(SIZE_DWORD); 
+   unsigned int dwSize = pop(SIZE_DWORD);
+   unsigned int flAllocationType = pop(SIZE_DWORD);
+   unsigned int flProtect = pop(SIZE_DWORD);
+   unsigned int base = lpAddress & 0xFFFFF000;
    if (lpAddress) {
-      dword end = (lpAddress + dwSize + 0xFFF) & 0xFFFFF000;
+      unsigned int end = (lpAddress + dwSize + 0xFFF) & 0xFFFFF000;
       dwSize = end - lpAddress;
    }
    else {
@@ -3417,10 +3417,10 @@ void emu_VirtualAlloc(dword /*addr*/) {
    }
 }
 
-void emu_VirtualFree(dword addr) {
+void emu_VirtualFree(unsigned int addr) {
    addr = pop(SIZE_DWORD);
-   dword dwSize = pop(SIZE_DWORD);
-   dword dwFreeType = pop(SIZE_DWORD);
+   unsigned int dwSize = pop(SIZE_DWORD);
+   unsigned int dwFreeType = pop(SIZE_DWORD);
    eax = MemMgr::munmap(addr, dwSize);   
 #ifdef DEBUG
    msg("x86emu: VirtualFree(0x%08x, %d) called: 0x%x\n", addr, dwSize, eax);
@@ -3431,11 +3431,11 @@ void emu_VirtualFree(dword addr) {
    }
 }
 
-void emu_VirtualProtect(dword /*addr*/) {
-   dword lpAddress = pop(SIZE_DWORD); 
-   dword dwSize = pop(SIZE_DWORD);
-   dword flNewProtect = pop(SIZE_DWORD);
-   dword lpflOldProtect = pop(SIZE_DWORD);
+void emu_VirtualProtect(unsigned int /*addr*/) {
+   unsigned int lpAddress = pop(SIZE_DWORD); 
+   unsigned int dwSize = pop(SIZE_DWORD);
+   unsigned int flNewProtect = pop(SIZE_DWORD);
+   unsigned int lpflOldProtect = pop(SIZE_DWORD);
 #ifdef DEBUG
    msg("x86emu: VirtualProtect(0x%08x, %d, 0x%x, 0x%08x)\n", 
        lpAddress, dwSize, flNewProtect, lpflOldProtect);
@@ -3447,9 +3447,9 @@ void emu_VirtualProtect(dword /*addr*/) {
    }
 }
 
-void emu_LocalAlloc(dword /*addr*/) {
-   dword uFlags = pop(SIZE_DWORD); 
-   dword dwSize = pop(SIZE_DWORD);
+void emu_LocalAlloc(unsigned int /*addr*/) {
+   unsigned int uFlags = pop(SIZE_DWORD); 
+   unsigned int dwSize = pop(SIZE_DWORD);
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->malloc(dwSize);
    if (doLogLib) {
@@ -3457,25 +3457,25 @@ void emu_LocalAlloc(dword /*addr*/) {
    }
 }
 
-void emu_LocalLock(dword /*addr*/) {
+void emu_LocalLock(unsigned int /*addr*/) {
    eax = pop(SIZE_DWORD); //***need to implement a locking mechanism
    if (doLogLib) {
       msg("call: LocalLock(0x%x) = 0x%x\n", eax, eax); 
    }
 }
 
-void emu_LocalUnlock(dword /*addr*/) {
-   dword hMem = pop(SIZE_DWORD);
+void emu_LocalUnlock(unsigned int /*addr*/) {
+   unsigned int hMem = pop(SIZE_DWORD);
    eax = 1;       //***need to implement a locking mechanism
    if (doLogLib) {
       msg("call: LocalUnlock(0x%x) = 0x%x\n", hMem, eax); 
    }
 }
 
-void emu_LocalReAlloc(dword /*addr*/) {
-   dword hMem = pop(SIZE_DWORD); 
-   dword uBytes = pop(SIZE_DWORD);
-   dword uFlags = pop(SIZE_DWORD); 
+void emu_LocalReAlloc(unsigned int /*addr*/) {
+   unsigned int hMem = pop(SIZE_DWORD); 
+   unsigned int uBytes = pop(SIZE_DWORD);
+   unsigned int uFlags = pop(SIZE_DWORD); 
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
    eax = p->realloc(hMem, uBytes);
    if (doLogLib) {
@@ -3483,9 +3483,9 @@ void emu_LocalReAlloc(dword /*addr*/) {
    }
 }
 
-void emu_LocalFree(dword /*addr*/) {
+void emu_LocalFree(unsigned int /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   dword ptr = pop(SIZE_DWORD);
+   unsigned int ptr = pop(SIZE_DWORD);
    eax = p->free(ptr);
    if (doLogLib) {
       msg("call: LocalFree(0x%x) = 0x%x\n", ptr, eax); 
@@ -3493,7 +3493,7 @@ void emu_LocalFree(dword /*addr*/) {
 }
 
 //funcName should be a library function name, and funcAddr its address
-hookfunc checkForHook(char *funcName, dword funcAddr, dword moduleId) {
+hookfunc checkForHook(char *funcName, unsigned int funcAddr, unsigned int moduleId) {
    int i = 0;
    for (i = 0; hookTable[i].fName; i++) {
       if (!strcmp(hookTable[i].fName, funcName)) {
@@ -3505,8 +3505,8 @@ hookfunc checkForHook(char *funcName, dword funcAddr, dword moduleId) {
    return addHook(funcName, funcAddr, unemulated, moduleId);
 }
 
-dword myGetProcAddress(dword hModule, dword lpProcName) {
-   dword h = 0;
+unsigned int myGetProcAddress(unsigned int hModule, unsigned int lpProcName) {
+   unsigned int h = 0;
    char *procName = NULL;
    HandleNode *m = findModuleByHandle(hModule);
    if (m == NULL) return 0;
@@ -3520,7 +3520,7 @@ dword myGetProcAddress(dword hModule, dword lpProcName) {
       if (dot) *dot = '_';
       if ((m->handle & FAKE_HANDLE_BASE) == 0) {
          lpProcName -= m->ordinal_base;
-         dword rva = get_long(m->eat + lpProcName * 4);
+         unsigned int rva = get_long(m->eat + lpProcName * 4);
          if (rva) {
             h = rva + m->handle;
          }
@@ -3545,7 +3545,7 @@ dword myGetProcAddress(dword hModule, dword lpProcName) {
             if (res == 0) {
                free(name);
                lpProcName = get_word(m->eot + mid * 2); // - m->ordinal_base;
-               dword rva = get_long(m->eat + lpProcName * 4);
+               unsigned int rva = get_long(m->eat + lpProcName * 4);
                if (rva) {
                   h = rva + m->handle;
                }
@@ -3566,8 +3566,8 @@ dword myGetProcAddress(dword hModule, dword lpProcName) {
    return h;
 }
 
-dword myGetProcAddress(dword hModule, const char *procName) {
-   dword h = 0;
+unsigned int myGetProcAddress(unsigned int hModule, const char *procName) {
+   unsigned int h = 0;
    HandleNode *m = findModuleByHandle(hModule);
    if (m == NULL) return 0;
    if ((m->handle & FAKE_HANDLE_BASE) == 0) {
@@ -3580,8 +3580,8 @@ dword myGetProcAddress(dword hModule, const char *procName) {
          int res = strcmp(name, procName);
          if (res == 0) {
             free(name);
-            dword lpProcName = get_word(m->eot + mid * 2); // - m->ordinal_base;
-            dword rva = get_long(m->eat + lpProcName * 4);
+            unsigned int lpProcName = get_word(m->eot + mid * 2); // - m->ordinal_base;
+            unsigned int rva = get_long(m->eat + lpProcName * 4);
             if (rva) {
                h = rva + m->handle;
             }
@@ -3596,11 +3596,11 @@ dword myGetProcAddress(dword hModule, const char *procName) {
 }
 
 //FARPROC __stdcall GetProcAddress(HMODULE hModule,LPCSTR lpProcName)
-void emu_GetProcAddress(dword /*addr*/) {
-   static dword address = 0x80000000;
-   static dword bad = 0xFFFFFFFF;
-   dword hModule = pop(SIZE_DWORD); 
-   dword lpProcName = pop(SIZE_DWORD);
+void emu_GetProcAddress(unsigned int /*addr*/) {
+   static unsigned int address = 0x80000000;
+   static unsigned int bad = 0xFFFFFFFF;
+   unsigned int hModule = pop(SIZE_DWORD); 
+   unsigned int lpProcName = pop(SIZE_DWORD);
    char *procName = NULL;
    int i;
    eax = myGetProcAddress(hModule, lpProcName);
@@ -3657,8 +3657,8 @@ void emu_GetProcAddress(dword /*addr*/) {
  * GetProcAddress: create a label at addr from lastProcName.
  */
 
-void makeImportLabel(dword addr, dword val) {
-   for (dword cnt = 0; cnt < 4; cnt++) {
+void makeImportLabel(unsigned int addr, unsigned int val) {
+   for (unsigned int cnt = 0; cnt < 4; cnt++) {
       do_unknown(addr + cnt, true); //undefine it
    }
    doDwrd(addr, 4);
@@ -3681,8 +3681,8 @@ void makeImportLabel(dword addr, dword val) {
    }
 }
 
-HandleNode *moduleCommonA(dword /*addr*/) {
-   dword lpModName = pop(SIZE_DWORD);
+HandleNode *moduleCommonA(unsigned int /*addr*/) {
+   unsigned int lpModName = pop(SIZE_DWORD);
    char *modName = getString(lpModName);
    modName = checkModuleExtension(modName);
    HandleNode *m = findModuleByName(modName);
@@ -3700,8 +3700,8 @@ HandleNode *moduleCommonA(dword /*addr*/) {
    return m;
 }
 
-HandleNode *moduleCommonW(dword /*addr*/) {
-   dword lpModName = pop(SIZE_DWORD);
+HandleNode *moduleCommonW(unsigned int /*addr*/) {
+   unsigned int lpModName = pop(SIZE_DWORD);
    char *modName = getStringW(lpModName);
    modName = checkModuleExtension(modName);
    HandleNode *m = findModuleByName(modName);
@@ -3738,13 +3738,13 @@ HandleNode *moduleCommon(char **modName) {
  */
 
 //HMODULE __stdcall GetModuleHandleA(LPCSTR lpModuleName)
-void emu_GetModuleHandleA(dword addr) {
+void emu_GetModuleHandleA(unsigned int addr) {
 #ifdef DEBUG
    msg("x86emu: GetModuleHandle");
 #endif
-   dword arg = readDword(esp);
+   unsigned int arg = readDword(esp);
    if (arg == 0) {
-      dword peb = readDword(fsBase + TEB_PEB_PTR);
+      unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
       eax = readDword(peb + PEB_IMAGE_BASE);
       pop(SIZE_DWORD);
       if (doLogLib) {
@@ -3761,10 +3761,10 @@ void emu_GetModuleHandleA(dword addr) {
 }
 
 //HMODULE __stdcall GetModuleHandleW(LPWSTR lpModuleName)
-void emu_GetModuleHandleW(dword addr) {
+void emu_GetModuleHandleW(unsigned int addr) {
    msg("x86emu: GetModuleHandle");
    if (readMem(esp, SIZE_DWORD) == 0) {
-      dword peb = readDword(fsBase + TEB_PEB_PTR);
+      unsigned int peb = readDword(fsBase + TEB_PEB_PTR);
       eax = readDword(peb + PEB_IMAGE_BASE);
       pop(SIZE_DWORD);
       if (doLogLib) {
@@ -3780,17 +3780,17 @@ void emu_GetModuleHandleW(dword addr) {
    }
 }
 
-void emu_LdrLoadDll(dword /*addr*/) {
+void emu_LdrLoadDll(unsigned int /*addr*/) {
    msg("x86emu: LdrLoadDll");
-   dword PathToFile = pop(SIZE_DWORD); 
-   dword Flags = pop(SIZE_DWORD); 
-   dword pModuleFileName = pop(SIZE_DWORD);   //PUNICODE_STRING
-   dword pModuleHandle = pop(SIZE_DWORD);
+   unsigned int PathToFile = pop(SIZE_DWORD); 
+   unsigned int Flags = pop(SIZE_DWORD); 
+   unsigned int pModuleFileName = pop(SIZE_DWORD);   //PUNICODE_STRING
+   unsigned int pModuleHandle = pop(SIZE_DWORD);
 
-   dword len = get_word(pModuleFileName);
-   dword buf = get_long(pModuleFileName + 4);
+   unsigned int len = get_word(pModuleFileName);
+   unsigned int buf = get_long(pModuleFileName + 4);
    char *modName = (char*)malloc(len + 1);
-   for (dword i = 0; i < len; i++) {
+   for (unsigned int i = 0; i < len; i++) {
       modName[i] = (char)get_word(buf + i * 2);
    }
    modName[len] = 0;
@@ -3804,18 +3804,18 @@ void emu_LdrLoadDll(dword /*addr*/) {
    free(modName);
 }
 
-void emu_LdrGetProcedureAddress(dword /*addr*/) {
-   static dword address = 0x80000000;
-   static dword bad = 0xFFFFFFFF;
+void emu_LdrGetProcedureAddress(unsigned int /*addr*/) {
+   static unsigned int address = 0x80000000;
+   static unsigned int bad = 0xFFFFFFFF;
 
-   dword hModule = pop(SIZE_DWORD); 
-   dword pFunctionName = pop(SIZE_DWORD);   //PANSI_STRING
-   dword Ordinal = pop(SIZE_DWORD);  
-   dword pFunctionAddress = pop(SIZE_DWORD);
+   unsigned int hModule = pop(SIZE_DWORD); 
+   unsigned int pFunctionName = pop(SIZE_DWORD);   //PANSI_STRING
+   unsigned int Ordinal = pop(SIZE_DWORD);  
+   unsigned int pFunctionAddress = pop(SIZE_DWORD);
 
    char *procName = NULL;
    int i;
-   dword func;
+   unsigned int func;
    if (pFunctionName) {
       func = myGetProcAddress(hModule, get_long(pFunctionName + 4));
    }
@@ -3861,8 +3861,8 @@ void emu_LdrGetProcedureAddress(dword /*addr*/) {
 }
 
 //HMODULE __stdcall emu_FreeLibrary(HANDLE hModule)
-void emu_FreeLibrary(dword /*addr*/) {
-   dword handle = pop(SIZE_DWORD); 
+void emu_FreeLibrary(unsigned int /*addr*/) {
+   unsigned int handle = pop(SIZE_DWORD); 
    eax = 1;
    if (doLogLib) {
       msg("call: FreeLibrary(0x%x) = 0x%x\n", handle, eax); 
@@ -3870,7 +3870,7 @@ void emu_FreeLibrary(dword /*addr*/) {
 }
 
 //HMODULE __stdcall LoadLibraryA(LPCSTR lpLibFileName)
-void emu_LoadLibraryA(dword addr) {
+void emu_LoadLibraryA(unsigned int addr) {
 #ifdef DEBUG
    msg("x86emu: LoadLibraryA");
 #endif
@@ -3882,7 +3882,7 @@ void emu_LoadLibraryA(dword addr) {
 }
 
 //HMODULE __stdcall LoadLibraryW(LPWSTR lpLibFileName)
-void emu_LoadLibraryW(dword addr) {
+void emu_LoadLibraryW(unsigned int addr) {
 #ifdef DEBUG
    msg("x86emu: LoadLibraryW");
 #endif
@@ -3895,13 +3895,13 @@ void emu_LoadLibraryW(dword addr) {
 
 //HMODULE __stdcall LoadLibraryExA(LPCSTR lpLibFileName)
 //*** need to honor dwFlags
-void emu_LoadLibraryExA(dword addr) {
+void emu_LoadLibraryExA(unsigned int addr) {
 #ifdef DEBUG
    msg("x86emu: LoadLibraryExA");
 #endif
    HandleNode *m = moduleCommonA(addr);
-   dword handle = pop(SIZE_DWORD); 
-   dword dwFlags = pop(SIZE_DWORD); 
+   unsigned int handle = pop(SIZE_DWORD); 
+   unsigned int dwFlags = pop(SIZE_DWORD); 
    eax = m->handle;
    if (doLogLib) {
       msg("call: LoadLibraryExA(\"%s\", 0x%x, 0x%x) = 0x%x\n", m->moduleName, handle, dwFlags, eax); 
@@ -3909,51 +3909,51 @@ void emu_LoadLibraryExA(dword addr) {
 }
 
 //HMODULE __stdcall LoadLibraryExW(LPWSTR lpLibFileName)
-void emu_LoadLibraryExW(dword addr) {
+void emu_LoadLibraryExW(unsigned int addr) {
 #ifdef DEBUG
    msg("x86emu: LoadLibraryExW");
 #endif
    HandleNode *m = moduleCommonW(addr);
-   dword handle = pop(SIZE_DWORD); 
-   dword dwFlags = pop(SIZE_DWORD); 
+   unsigned int handle = pop(SIZE_DWORD); 
+   unsigned int dwFlags = pop(SIZE_DWORD); 
    eax = m->handle;
    if (doLogLib) {
       msg("call: LoadLibraryExW(\"%s\", 0x%x, 0x%x) = 0x%x\n", m->moduleName, handle, dwFlags, eax); 
    }
 }
 
-void emu_malloc(dword /*addr*/) {
+void emu_malloc(unsigned int /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   dword sz = readDword(esp);
+   unsigned int sz = readDword(esp);
    eax = p->malloc(sz);
    if (doLogLib) {
       msg("call: malloc(0x%x) = 0x%x\n", sz, eax); 
    }
 }
 
-void emu_calloc(dword /*addr*/) {
+void emu_calloc(unsigned int /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   dword sz = readDword(esp);
-   dword nitems = readDword(esp + 4);
+   unsigned int sz = readDword(esp);
+   unsigned int nitems = readDword(esp + 4);
    eax = p->calloc(sz, nitems);
    if (doLogLib) {
       msg("call: calloc(0x%x, 0x%x) = 0x%x\n", sz, nitems, eax); 
    }
 }
 
-void emu_realloc(dword /*addr*/) {
+void emu_realloc(unsigned int /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   dword ptr = readDword(esp);
-   dword sz = readDword(esp + 4);
+   unsigned int ptr = readDword(esp);
+   unsigned int sz = readDword(esp + 4);
    eax = p->realloc(ptr, sz);
    if (doLogLib) {
       msg("call: realloc(0x%x, 0x%x) = 0x%x\n", ptr, sz, eax); 
    }
 }
 
-void emu_free(dword /*addr*/) {
+void emu_free(unsigned int /*addr*/) {
    EmuHeap *p = (EmuHeap*)HeapBase::getHeap();
-   dword ptr = readDword(esp);
+   unsigned int ptr = readDword(esp);
    p->free(ptr);
    if (doLogLib) {
       msg("call: free(0x%x) = 0x%x\n", ptr, eax); 
@@ -3964,17 +3964,17 @@ void doImports(PETables &pe) {
    for (thunk_rec *tr = pe.imports; tr; tr = tr->next) {
       HandleNode *m = addModule(tr->dll_name, false, 0);
 
-      dword slot = tr->iat_base + pe.base;
+      unsigned int slot = tr->iat_base + pe.base;
 //      msg("processing %s imports slot = %x\n", tr->dll_name, slot);
       for (int i = 0; tr->iat[i]; i++, slot += 4) {
-         dword fname = pe.base + tr->iat[i] + 2;
-         dword f = 0;
+         unsigned int fname = pe.base + tr->iat[i] + 2;
+         unsigned int f = 0;
          if (m->handle & FAKE_HANDLE_BASE) {
             f = slot;
          }
          else {  //need to deal with ordinals here
             f = myGetProcAddress(m->handle, fname);
-//            reverseLookupExport((dword)f);
+//            reverseLookupExport((unsigned int)f);
          }
 //         msg("found %x for %s slot %x\n", f, fname, slot);
          do_unknown(slot, 0);
@@ -3991,7 +3991,7 @@ void doImports(PETables &pe) {
 }
 
 //okay to call for ELF, but module list should be empty
-HandleNode *moduleFromAddress(dword addr) {
+HandleNode *moduleFromAddress(unsigned int addr) {
    HandleNode *hl, *result = NULL;
    for (hl = moduleHead; hl; hl = hl->next) {
       if (addr < hl->maxAddr && addr >= hl->handle) {
@@ -4002,26 +4002,26 @@ HandleNode *moduleFromAddress(dword addr) {
    return result;
 }
 
-bool isModuleAddress(dword addr) {
+bool isModuleAddress(unsigned int addr) {
    return moduleFromAddress(addr) != NULL;
 }
 
-int reverseLookupFunc(dword EAT, dword func, dword max, dword base) {
-   for (dword i = 0; i < max; i++) {
+int reverseLookupFunc(unsigned int EAT, unsigned int func, unsigned int max, unsigned int base) {
+   for (unsigned int i = 0; i < max; i++) {
       if ((get_long(EAT + i * 4) + base) == func) return (int)i;
    }
    return -1;
 }
 
-int reverseLookupOrd(dword EOT, word ord, dword max) {
-   for (dword i = 0; i < max; i++) {
+int reverseLookupOrd(unsigned int EOT, unsigned short ord, unsigned int max) {
+   for (unsigned int i = 0; i < max; i++) {
       if (get_word(EOT + i * 2) == ord) return (int)i;
    }
    return -1;
 }
 
 //need to add fake_list check for lookups that have been faked
-char *reverseLookupExport(dword addr) {
+char *reverseLookupExport(unsigned int addr) {
    HandleNode *hl;
    char *fname = NULL;
    for (hl = moduleHead; hl; hl = hl->next) {
@@ -4341,7 +4341,7 @@ FunctionInfo *getFunctionInfo(const char *name) {
    return f;
 }
 
-void addFunctionInfo(const char *name, dword result, dword nitems, dword callType) {
+void addFunctionInfo(const char *name, unsigned int result, unsigned int nitems, unsigned int callType) {
    FunctionInfo *f;
    for (f = functionInfoList; f; f = f->next) {
       if (!strcmp(name, f->fname)) break;
@@ -4405,52 +4405,52 @@ void init_til(const char *tilFile) {
    ti = load_til(tilpath, tilFile, err, sizeof(err));
 }
 
-void emu_exit(dword retval) {
+void emu_exit(unsigned int retval) {
    msg("Program exited with code %d\n", retval);
    shouldBreak = 1;
 }
 
-dword emu_read(dword /*fd*/, dword /*buf*/, dword len) {
+unsigned int emu_read(unsigned int /*fd*/, unsigned int /*buf*/, unsigned int len) {
    return len;
 }
 
-dword emu_write(dword /*fd*/, dword /*buf*/, dword len) {
+unsigned int emu_write(unsigned int /*fd*/, unsigned int /*buf*/, unsigned int len) {
    return len;
 }
 
-dword emu_open(dword /*fname*/, dword /*flags*/, dword /*mode*/) {
+unsigned int emu_open(unsigned int /*fname*/, unsigned int /*flags*/, unsigned int /*mode*/) {
    return 0;
 }
 
-dword emu_close(dword /*fd*/) {
+unsigned int emu_close(unsigned int /*fd*/) {
    return 0;
 }
 
-dword linux_mmap(dword addr, dword len, dword prot, dword flags, dword /*fd*/, dword /*offset*/) {
-   dword base = addr & 0xFFFFF000;
+unsigned int linux_mmap(unsigned int addr, unsigned int len, unsigned int prot, unsigned int flags, unsigned int /*fd*/, unsigned int /*offset*/) {
+   unsigned int base = addr & 0xFFFFF000;
    if (base) {
-      dword end = (base + len + 0xFFF) & 0xFFFFF000;
+      unsigned int end = (base + len + 0xFFF) & 0xFFFFF000;
       len = end - base;
    }
    else {
       len = (len + 0xFFF) & 0xFFFFF000;
    }
-   dword res = MemMgr::mmap(base, len, prot, flags);
+   unsigned int res = MemMgr::mmap(base, len, prot, flags);
    if (flags & LINUX_MAP_ANONYMOUS) {
       //mmap'ing a file
    }
    return res;
 }
 
-dword linux_munmap() {
-   dword len = ecx;
-   dword base = ebx & 0xFFFFF000;
-   dword end = (base + ecx + 0xFFF) & 0xFFFFF000;
+unsigned int linux_munmap() {
+   unsigned int len = ecx;
+   unsigned int base = ebx & 0xFFFFF000;
+   unsigned int end = (base + ecx + 0xFFF) & 0xFFFFF000;
    len = end - base;
    return MemMgr::munmap(base, len);   
 }
 
-void emu_exit_group(dword retval) {
+void emu_exit_group(unsigned int retval) {
    msg("Program exited with code %d\n", retval);
    shouldBreak = 1;
 }
@@ -4478,7 +4478,7 @@ void syscall() {
                eax = emu_close(ebx);
                break;
             case LINUX_SYS_BRK: { //45
-               dword cbrk = (dword)kernel_node.altval(OS_LINUX_BRK);
+               unsigned int cbrk = (unsigned int)kernel_node.altval(OS_LINUX_BRK);
 //               segment_t *s = getseg(cbrk - 1);
 #if IDA_SDK_VERSION > 520
                segment_t *s = get_prev_seg(ebx);
@@ -4487,13 +4487,13 @@ void syscall() {
 #endif
                if (ebx && ebx != cbrk) {
                   if (ebx > inf.omaxEA) {
-                     dword newbrk = (ebx + 0xfff) & ~0xfff;
+                     unsigned int newbrk = (ebx + 0xfff) & ~0xfff;
                      if (s) {
-                        cbrk = (dword)s->endEA;
+                        cbrk = (unsigned int)s->endEA;
 //                        set_segm_end(cbrk - 1, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
                         set_segm_end(s->startEA, newbrk, SEGMOD_KEEP | SEGMOD_SILENT);
                         if (newbrk > cbrk) {
-                           for (dword i = cbrk; i < newbrk; i++) {
+                           for (unsigned int i = cbrk; i < newbrk; i++) {
                               patch_byte(i, 0);
                            }
                         }
@@ -4523,7 +4523,7 @@ void syscall() {
                eax = linux_mmap(ebx, ecx, edx, esi, edi, ebp << 12);
                break;
             case LINUX_SYS_SET_THREAD_AREA: { //243
-               dword desc = readDword(ebx);
+               unsigned int desc = readDword(ebx);
                //need a gdt implementation
                if (desc == 0xffffffff) {
                   //we choose desc

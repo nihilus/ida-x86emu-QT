@@ -25,57 +25,57 @@
 #define MAXIMUM_EXTENSION    512
 
 struct WIN_FLOATING_SAVE_AREA {
-   dword   ControlWord;
-   dword   StatusWord;
-   dword   TagWord;
-   dword   ErrorOffset;
-   dword   ErrorSelector;
-   dword   DataOffset;
-   dword   DataSelector;
-   byte    RegisterArea[SIZEOF_387_REGS];
-   dword   Cr0NpxState;
+   unsigned int   ControlWord;
+   unsigned int   StatusWord;
+   unsigned int   TagWord;
+   unsigned int   ErrorOffset;
+   unsigned int   ErrorSelector;
+   unsigned int   DataOffset;
+   unsigned int   DataSelector;
+   unsigned char    RegisterArea[SIZEOF_387_REGS];
+   unsigned int   Cr0NpxState;
 };
 
 struct WIN_CONTEXT {
 
-   dword ContextFlags;
+   unsigned int ContextFlags;
 
-   dword   Dr0;
-   dword   Dr1;
-   dword   Dr2;
-   dword   Dr3;
-   dword   Dr6;
-   dword   Dr7;
+   unsigned int   Dr0;
+   unsigned int   Dr1;
+   unsigned int   Dr2;
+   unsigned int   Dr3;
+   unsigned int   Dr6;
+   unsigned int   Dr7;
 
    WIN_FLOATING_SAVE_AREA FloatSave;
 
-   dword   SegGs;
-   dword   SegFs;
-   dword   SegEs;
-   dword   SegDs;
+   unsigned int   SegGs;
+   unsigned int   SegFs;
+   unsigned int   SegEs;
+   unsigned int   SegDs;
 
-   dword   Edi;   //0x9C
-   dword   Esi;   //0xA0
-   dword   Ebx;   //0xA4
-   dword   Edx;   //0xA8
-   dword   Ecx;   //0xAC
-   dword   Eax;   //0xB0
+   unsigned int   Edi;   //0x9C
+   unsigned int   Esi;   //0xA0
+   unsigned int   Ebx;   //0xA4
+   unsigned int   Edx;   //0xA8
+   unsigned int   Ecx;   //0xAC
+   unsigned int   Eax;   //0xB0
 
-   dword   Ebp;   //0xB4
-   dword   Eip;   //0xB8
-   dword   SegCs;
-   dword   EFlags;
-   dword   Esp;
-   dword   SegSs;
+   unsigned int   Ebp;   //0xB4
+   unsigned int   Eip;   //0xB8
+   unsigned int   SegCs;
+   unsigned int   EFlags;
+   unsigned int   Esp;
+   unsigned int   SegSs;
 
-   byte   ExtendedRegisters[MAXIMUM_EXTENSION];
+   unsigned char   ExtendedRegisters[MAXIMUM_EXTENSION];
 
 };
 
 void regsToContext(Registers *regs, WIN_CONTEXT *ctx);
 void contextToRegs(WIN_CONTEXT *ctx, Registers *regs);
 void initContext(WIN_CONTEXT *ctx);
-void copyContextToMem(WIN_CONTEXT *ctx, dword addr);
+void copyContextToMem(WIN_CONTEXT *ctx, unsigned int addr);
 
 
 #endif
