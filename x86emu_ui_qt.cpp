@@ -65,7 +65,7 @@ X86Dialog *x86Dlg;
 
 QValidator::State AllIntValidator::validate(QString &input, int & /*pos*/) const {
    char *endptr;
-   QByteArray qba = input.toAscii(); 
+   QByteArray qba = input.toLatin1(); 
    char *nptr = qba.data();
    if (*nptr == 0 || stricmp("0x", nptr) == 0) {
       return Intermediate;
@@ -170,7 +170,7 @@ void updateRegisterControl(int controlID) {
 //get an int value from edit box string
 //assumes value is a valid hex string
 unsigned int getEditBoxInt(QLineEdit *l) {
-   return strtoul(l->text().toAscii().data(), NULL, 0);
+   return strtoul(l->text().toLatin1().data(), NULL, 0);
 }
 
 //display a single line input box with the given title, prompt
@@ -182,7 +182,7 @@ char *inputBox(const char *boxTitle, const char *msg, const char *init) {
    QString text = QInputDialog::getText(getWidgetParent(), boxTitle,
                               msg, QLineEdit::Normal, init, &ok);
    if (ok && !text.isEmpty()) {
-      ::qstrncpy(value, text.toAscii().data(), sizeof(value));
+      ::qstrncpy(value, text.toLatin1().data(), sizeof(value));
       return value;
    }
    return NULL;
@@ -218,7 +218,7 @@ char *getSaveFileName(const char *title, char *fileName, int nameSize, const cha
    QString f = QFileDialog::getSaveFileName(getWidgetParent(), title,
                                             QString(), filter);
    if (!f.isNull()) {
-      QByteArray qba = f.toAscii();
+      QByteArray qba = f.toLatin1();
       ::qstrncpy(fileName, qba.data(), nameSize);
       return fileName;
    }
@@ -235,7 +235,7 @@ char *getDirectoryName(const char *title, char *dirName, int nameSize) {
                                                  | QFileDialog::DontResolveSymlinks);   
    
    if (!dir.isNull()) {
-      QByteArray qba = dir.toAscii();
+      QByteArray qba = dir.toLatin1();
       ::qstrncpy(dirName, qba.data(), nameSize);
       return dirName;
    }
@@ -278,7 +278,7 @@ void argCallback(const char * /*func*/, const char *arg, int idx, void *user) {
 
 void UnemulatedDialog::do_ok() {
    unsigned int retval = 0;
-   QByteArray _v = ue_return->text().toAscii();
+   QByteArray _v = ue_return->text().toLatin1();
    char *value = _v.data();
    retval = strtoul(value, NULL, 0);
    eax = retval;
@@ -601,7 +601,7 @@ char *getOpenFileName(const char *title, char *fileName, int nameLen, const char
    QString f = QFileDialog::getOpenFileName(getWidgetParent(), title,
                                             initDir, filter);
    if (!f.isNull()) {
-      QByteArray qba = f.toAscii();
+      QByteArray qba = f.toLatin1();
       ::qstrncpy(fileName, qba.data(), nameLen);
       return fileName;
    }
@@ -624,10 +624,10 @@ static void setMemValues(unsigned int addr, const char *v, unsigned int sz) {
 }
 
 void SetMemoryDialog::do_ok() {
-   QByteArray a = mem_start->text().toAscii();
+   QByteArray a = mem_start->text().toLatin1();
    const char *ea = a.data();
    unsigned int addr = strtoul(ea, 0, 0);
-   QByteArray t = mem_values->text().toAscii();
+   QByteArray t = mem_values->text().toLatin1();
    const char *v = t.data();
 
    if (type_file->isChecked()) {
@@ -752,7 +752,7 @@ bool getMmapBlockData(unsigned int *base, unsigned int *size) {
    char msg_buf[128];
    MmapDialog mm(getWidgetParent());
    if (mm.exec()) {
-      QByteArray _ms = mm.mmap_size->text().toAscii(); 
+      QByteArray _ms = mm.mmap_size->text().toLatin1(); 
       char *ms = _ms.data();
       char *endptr;
       *size = strtoul(ms, &endptr, 0);
@@ -761,7 +761,7 @@ bool getMmapBlockData(unsigned int *base, unsigned int *size) {
          showErrorMessage(msg_buf);
          return false;
       }
-      QByteArray _mb = mm.mmap_base->text().toAscii();
+      QByteArray _mb = mm.mmap_base->text().toLatin1();
       char *mb = _mb.data();
       *base = strtoul(mb, &endptr, 0);
       if (*endptr) {
@@ -838,19 +838,19 @@ static QString &formatReg(QString &qs, const char *format, unsigned int val) {
 }
 
 void SegmentsDialog::do_ok() {
-   _cs = strtoul(qcs_reg->text().toAscii().data(), NULL, 0);
-   _ds = strtoul(qds_reg->text().toAscii().data(), NULL, 0);
-   _es = strtoul(qes_reg->text().toAscii().data(), NULL, 0);
-   _fs = strtoul(qfs_reg->text().toAscii().data(), NULL, 0);
-   _gs = strtoul(qgs_reg->text().toAscii().data(), NULL, 0);
-   _ss = strtoul(qss_reg->text().toAscii().data(), NULL, 0);
+   _cs = strtoul(qcs_reg->text().toLatin1().data(), NULL, 0);
+   _ds = strtoul(qds_reg->text().toLatin1().data(), NULL, 0);
+   _es = strtoul(qes_reg->text().toLatin1().data(), NULL, 0);
+   _fs = strtoul(qfs_reg->text().toLatin1().data(), NULL, 0);
+   _gs = strtoul(qgs_reg->text().toLatin1().data(), NULL, 0);
+   _ss = strtoul(qss_reg->text().toLatin1().data(), NULL, 0);
 
-   csBase = strtoul(qcs_base->text().toAscii().data(), NULL, 0);
-   dsBase = strtoul(qds_base->text().toAscii().data(), NULL, 0);
-   esBase = strtoul(qes_base->text().toAscii().data(), NULL, 0);
-   fsBase = strtoul(qfs_base->text().toAscii().data(), NULL, 0);
-   gsBase = strtoul(qgs_base->text().toAscii().data(), NULL, 0);
-   ssBase = strtoul(qss_base->text().toAscii().data(), NULL, 0);
+   csBase = strtoul(qcs_base->text().toLatin1().data(), NULL, 0);
+   dsBase = strtoul(qds_base->text().toLatin1().data(), NULL, 0);
+   esBase = strtoul(qes_base->text().toLatin1().data(), NULL, 0);
+   fsBase = strtoul(qfs_base->text().toLatin1().data(), NULL, 0);
+   gsBase = strtoul(qgs_base->text().toLatin1().data(), NULL, 0);
+   ssBase = strtoul(qss_base->text().toLatin1().data(), NULL, 0);
 
    accept();
 }
@@ -956,7 +956,7 @@ SegmentsDialog::SegmentsDialog(QWidget *parent) : QDialog(parent) {
 }
 
 void changeReg(int reg, const QString &val) {
-   setRegisterValue(reg, strtoul(val.toAscii().data(), NULL, 0));
+   setRegisterValue(reg, strtoul(val.toLatin1().data(), NULL, 0));
 }
 
 void X86Dialog::changeEax() {

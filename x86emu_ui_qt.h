@@ -27,14 +27,27 @@
 #endif
 
 #include <QtGui>
+#include <QtCore>
 #include <QDialog>
+#include <QFileDialog>
+#include <QLabel>
 #include <QListWidget>
 #include <QLineEdit>
+#include <QString>
+#include <QGroupBox>
+#include <QHBoxLayout>
+#include <QFormLayout>
 #include <QComboBox>
 #include <QMainWindow>
 #include <QRadioButton>
 #include <QValidator>
 #include <QSpinBox>
+#include <QPushButton>
+#include <QApplication>
+#include <QMenu>
+#include <QInputDialog>
+
+
 
 #include "x86defs.h"
 #include "x86emu_ui.h"

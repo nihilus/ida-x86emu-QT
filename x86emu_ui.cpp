@@ -909,7 +909,7 @@ BOOL CALLBACK MmapDlgProc(HWND hwndDlg, UINT message,
 bool createEmulatorWindow() {
    if (hModule == NULL) {
       mainWindow = (HWND)callui(ui_get_hwnd).vptr;
-      hModule = GetModuleHandle("x86emu.plw");
+      hModule = GetModuleHandle("x86emu-qt.plw");
       fixed = (HFONT)GetStockObject(ANSI_FIXED_FONT);
    }
    x86Dlg = CreateDialog(hModule, MAKEINTRESOURCE(IDD_EMUDIALOG),

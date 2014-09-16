@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "x86emu", "x86emu.vcxproj", "{7B4A96A3-659F-44A7-8A1E-B99CB16DD02E}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "x86emu-qt", "x86emu-qt.vcxproj", "{7B4A96A3-659F-44A7-8A1E-B99CB16DD02E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +21,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		Qt5Version = msvc2010
+		Qt5Version = msvc2010_opengl
 	EndGlobalSection
 EndGlobal

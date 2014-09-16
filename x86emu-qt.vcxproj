@@ -16,7 +16,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{7B4A96A3-659F-44A7-8A1E-B99CB16DD02E}</ProjectGuid>
-    <RootNamespace>x86emu</RootNamespace>
+    <RootNamespace>x86emu-qt</RootNamespace>
     <Keyword>Qt4VSv1.0</Keyword>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -73,10 +73,10 @@
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">$(ProjectName)</TargetName>
     <IncludePath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../include;C:\Program\WTL\Include;C:\Program\boost\boost_1_54_0;$(IncludePath)</IncludePath>
     <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">../../include;C:\Program\WTL\Include;C:\Program\boost\boost_1_54_0;$(IncludePath)</IncludePath>
-    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../../include;C:\Program\WTL\Include;C:\Program\boost\boost_1_54_0;$(IncludePath)</IncludePath>
+    <IncludePath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Program\WTL\Include;C:\Program\boost\boost_1_54_0;$(IncludePath)</IncludePath>
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">../../lib/x86_win_vc_32;C:\Program\boost\boost_1_54_0\stage\lib;$(LibraryPath)</LibraryPath>
     <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">../../lib/x86_win_vc_64;C:\Program\boost\boost_1_54_0\stage\lib;$(LibraryPath)</LibraryPath>
-    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">../../lib/x86_win_vc_32;C:\Program\boost\boost_1_54_0\stage\lib;$(LibraryPath)</LibraryPath>
+    <LibraryPath Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Program\boost\boost_1_54_0\stage\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Midl>
@@ -91,7 +91,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>C:\Program\Qt\5.1.0\msvc2010\include\QtANGLE;C:\Program\Qt\5.1.0\msvc2010\include\qtmain;C:\Program\Qt\5.1.0\msvc2010\include\QtCore;C:\Program\Qt\5.1.0\msvc2010\include\QtGui;C:\Program\Qt\5.1.0\msvc2010\include;.;.\GeneratedFiles;C:\Program\Qt\5.1.0\msvc2010\include\QtWidgets;C:\Program\Qt\5.1.0\msvc2010\include\QtXml;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../../include;$(QTDIR)\include\QtANGLE;$(QTDIR)\include\qtmain;$(QTDIR)\include\QtCore;$(QTDIR)\include\QtGui;$(QTDIR)\include;.;.\GeneratedFiles;$(QTDIR)\include\QtWidgets;$(QTDIR)\include\QtXml;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__QT__;_CRT_SECURE_NO_WARNINGS;NOMINMAX;QT_DLL;QT_CORE_LIB;QT_XML_LIB;QT_GUI_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;__NT__;__IDP__;%(PreprocessorDefinitions);_CRT_SECURE_NO_WARNINGS=1;QT_LARGEFILE_SUPPORT;QT_WIDGETS_LIB</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -109,10 +109,10 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/export:PLUGIN %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Cored.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Gui.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Core.lib;ida.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Xml.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Qt5Cored.lib;Qt5Gui.lib;Qt5Core.lib;ida.lib;Qt5Xml.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(ProjectName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <AdditionalLibraryDirectories>C:\Program\Qt\5.1.0\msvc2010\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../../lib/x86_win_vc_32;$(QTDIR)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>
       </DataExecutionPrevention>
@@ -137,7 +137,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>C:\Program\Qt\5.1.0\msvc2010\include\QtANGLE;C:\Program\Qt\5.1.0\msvc2010\include\qtmain;C:\Program\Qt\5.1.0\msvc2010\include\QtCore;C:\Program\Qt\5.1.0\msvc2010\include\QtGui;C:\Program\Qt\5.1.0\msvc2010\include;.;.\GeneratedFiles;C:\Program\Qt\5.1.0\msvc2010\include\QtWidgets;C:\Program\Qt\5.1.0\msvc2010\include\QtXml;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../../include;$(QTDIR)\include\QtANGLE;$(QTDIR)\include\qtmain;$(QTDIR)\include\QtCore;$(QTDIR)\include\QtGui;$(QTDIR)\include;.;.\GeneratedFiles;$(QTDIR)\include\QtWidgets;$(QTDIR)\include\QtXml;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__QT__;_CRT_SECURE_NO_WARNINGS;NOMINMAX;QT_DLL;QT_CORE_LIB;QT_XML_LIB;QT_GUI_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;__NT__;__IDP__;%(PreprocessorDefinitions);_CRT_SECURE_NO_WARNINGS=1;QT_LARGEFILE_SUPPORT;QT_WIDGETS_LIB</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -157,10 +157,10 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/export:PLUGIN %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Cored.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Gui.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Core.lib;ida.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Xml.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Qt5Cored.lib;Qt5Gui.lib;Qt5Core.lib;ida.lib;Qt5Xml.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(ProjectName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <AdditionalLibraryDirectories>C:\Program\Qt\5.1.0\msvc2010\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../../lib/x86_win_vc_32;$(QTDIR)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>
       </DataExecutionPrevention>
@@ -185,7 +185,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
-      <AdditionalIncludeDirectories>C:\Program\Qt\5.1.0\msvc2010\include\QtANGLE;C:\Program\Qt\5.1.0\msvc2010\include\qtmain;C:\Program\Qt\5.1.0\msvc2010\include\QtCore;C:\Program\Qt\5.1.0\msvc2010\include\QtGui;C:\Program\Qt\5.1.0\msvc2010\include;.;.\GeneratedFiles;C:\Program\Qt\5.1.0\msvc2010\include\QtWidgets;C:\Program\Qt\5.1.0\msvc2010\include\QtXml;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../../include;$(QTDIR)\include\QtANGLE;$(QTDIR)\include\qtmain;$(QTDIR)\include\QtCore;$(QTDIR)\include\QtGui;$(QTDIR)\include;.;.\GeneratedFiles;$(QTDIR)\include\QtWidgets;$(QTDIR)\include\QtXml;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__QT__;_CRT_SECURE_NO_WARNINGS;NOMINMAX;QT_DLL;QT_CORE_LIB;QT_XML_LIB;QT_GUI_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;__NT__;__IDP__;%(PreprocessorDefinitions);_CRT_SECURE_NO_WARNINGS=1;QT_LARGEFILE_SUPPORT;QT_WIDGETS_LIB</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -203,10 +203,10 @@
     </ResourceCompile>
     <Link>
       <AdditionalOptions>/export:PLUGIN %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Cored.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Gui.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Core.lib;ida.lib;C:\Program\Qt\5.1.0\msvc2010\lib\Qt5Xml.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Qt5Cored.lib;Qt5Gui.lib;Qt5Core.lib;ida.lib;Qt5Xml.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OutputFile>$(ProjectName)$(TargetExt)</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <AdditionalLibraryDirectories>C:\Program\Qt\5.1.0\msvc2010\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>../../lib/x86_win_vc_64;$(QTDIR)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>
       </DataExecutionPrevention>
@@ -227,12 +227,14 @@
     <ClCompile Include="emufuncs.cpp" />
     <ClCompile Include="emuheap.cpp" />
     <ClCompile Include="emuthreads.cpp" />
+    <ClCompile Include="GeneratedFiles\moc_x86emu_ui_qt.cpp" />
     <ClCompile Include="hooklist.cpp" />
     <ClCompile Include="memmgr.cpp" />
     <ClCompile Include="peutils.cpp" />
     <ClCompile Include="seh.cpp" />
     <ClCompile Include="x86emu.cpp" />
     <ClCompile Include="x86emu_ui.cpp" />
+    <ClCompile Include="x86emu_ui_qt.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="break.h" />
@@ -253,16 +255,34 @@
     <ClInclude Include="seh.h" />
     <ClInclude Include="x86defs.h" />
     <ClInclude Include="x86emu_ui.h" />
+    <CustomBuild Include="x86emu_ui_qt.h">
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Moc%27ing x86emu_ui_qt.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">.\GeneratedFiles\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\moc_%(Filename).cpp"  -D__QT__ -D_CRT_SECURE_NO_WARNINGS -DNOMINMAX -DQT_DLL -DQT_CORE_LIB -DQT_XML_LIB -DQT_GUI_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D__NT__ -D__IDP__ "-D\"$(INHERIT)\"" -D_CRT_SECURE_NO_WARNINGS=1 -DQT_LARGEFILE_SUPPORT -DQT_WIDGETS_LIB -D_VC80_UPGRADE=0x0600 -D_WINDLL -D_MBCS "-I$(QTDIR)\include\QtANGLE" "-I$(QTDIR)\include\qtmain" "-I$(QTDIR)\include\QtCore" "-I$(QTDIR)\include\QtGui" "-I$(QTDIR)\include" "-I." "-I.\GeneratedFiles" "-I$(QTDIR)\include\QtWidgets" "-I$(QTDIR)\include\QtXml"</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">Moc%27ing x86emu_ui_qt.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">.\GeneratedFiles\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release64|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\moc_%(Filename).cpp"  -D__QT__ -D_CRT_SECURE_NO_WARNINGS -DNOMINMAX -DQT_DLL -DQT_CORE_LIB -DQT_XML_LIB -DQT_GUI_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D__NT__ -D__IDP__ "-D\"$(INHERIT)\"" -D_CRT_SECURE_NO_WARNINGS=1 -DQT_LARGEFILE_SUPPORT -DQT_WIDGETS_LIB -D_VC80_UPGRADE=0x0600 -D_WINDLL -D_MBCS "-I$(QTDIR)\include\QtANGLE" "-I$(QTDIR)\include\qtmain" "-I$(QTDIR)\include\QtCore" "-I$(QTDIR)\include\QtGui" "-I$(QTDIR)\include" "-I." "-I.\GeneratedFiles" "-I$(QTDIR)\include\QtWidgets" "-I$(QTDIR)\include\QtXml"</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Moc%27ing x86emu_ui_qt.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">.\GeneratedFiles\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\moc_%(Filename).cpp"  -D__QT__ -D_CRT_SECURE_NO_WARNINGS -DNOMINMAX -DQT_DLL -DQT_CORE_LIB -DQT_XML_LIB -DQT_GUI_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D__NT__ -D__IDP__ "-D\"$(INHERIT)\"" -D_CRT_SECURE_NO_WARNINGS=1 -DQT_LARGEFILE_SUPPORT -DQT_WIDGETS_LIB -D_VC80_UPGRADE=0x0600 -D_WINDLL -D_MBCS "-I$(QTDIR)\include\QtANGLE" "-I$(QTDIR)\include\qtmain" "-I$(QTDIR)\include\QtCore" "-I$(QTDIR)\include\QtGui" "-I$(QTDIR)\include" "-I." "-I.\GeneratedFiles" "-I$(QTDIR)\include\QtWidgets" "-I$(QTDIR)\include\QtXml"</Command>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="dialog.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="x86emu-qt.pro" />
+    <None Include="x86emu64-qt.pro" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
   <ProjectExtensions>
     <VisualStudio>
-      <UserProperties />
+      <UserProperties Qt5Version_x0020_Win32="msvc2010_opengl" />
     </VisualStudio>
   </ProjectExtensions>
 </Project>

@@ -24,7 +24,8 @@ HEADERS += ./break.h \
     ./sdk_versions.h \
     ./seh.h \
     ./x86defs.h \
-    ./x86emu_ui.h
+    ./x86emu_ui.h \
+    ./x86emu_ui_qt.h
 SOURCES += ./break.cpp \
     ./buffer.cpp \
     ./context.cpp \
@@ -38,4 +39,5 @@ SOURCES += ./break.cpp \
     ./peutils.cpp \
     ./seh.cpp \
     ./x86emu.cpp \
-    ./x86emu_ui.cpp
+    ./x86emu_ui.cpp \
+    ./x86emu_ui_qt.cpp
