@@ -1,7 +1,7 @@
 
 #your Ida SDK location either relative to ida-x86emu/trunk
 #or absolute
-SDK = ../../..
+SDK = ../..
 
 OBJECTS_DIR = p32
 
