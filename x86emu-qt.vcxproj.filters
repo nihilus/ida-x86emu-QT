@@ -62,9 +62,6 @@
     <ClCompile Include="x86emu_ui.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\moc_x86emu_ui_qt.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
     <ClCompile Include="x86emu_ui_qt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -124,19 +121,13 @@
     <ClInclude Include="x86emu_ui.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="x86emu_ui_qt.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="dialog.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="x86emu-qt.pro" />
-    <None Include="x86emu64-qt.pro" />
-  </ItemGroup>
-  <ItemGroup>
-    <CustomBuild Include="x86emu_ui_qt.h">
-      <Filter>Header Files</Filter>
-    </CustomBuild>
   </ItemGroup>
 </Project>
