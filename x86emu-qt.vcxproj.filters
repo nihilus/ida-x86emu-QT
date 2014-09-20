@@ -59,9 +59,6 @@
     <ClCompile Include="x86emu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="x86emu_ui.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="x86emu_ui_qt.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -116,9 +113,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="x86defs.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="x86emu_ui.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="x86emu_ui_qt.h">
