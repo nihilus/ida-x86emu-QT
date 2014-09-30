@@ -1,7 +1,7 @@
 
 #your Ida SDK location either relative to ida-x86emu/trunk
 #or absolute
-SDK = ../../..
+SDK = ../..
 
 OBJECTS_DIR = p64
 
@@ -45,7 +45,7 @@ linux-g++:DEFINES += __LINUX__
 macx:DEFINES += __MAC__
 
 win32:LIBS += comdlg32.lib gdi32.lib user32.lib advapi32.lib ida.lib
-win32-msvc2008: {
+win32-msvc2010: {
    exists( $${SDK}/lib/vc.w64/ida.lib ) {
       LIBS += -L$${SDK}/lib/vc.w64
    } else {
